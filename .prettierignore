@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+dist-electron/
+coverage/
+package-lock.json
+.husky/_/
+playwright-report/
+test-results/
+.e2e-build/

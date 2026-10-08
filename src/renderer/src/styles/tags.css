@@ -1,0 +1,156 @@
+@layer components {
+  .search-scope-box:focus-within,
+  .sort-box:focus-within {
+    @apply border-[#73a8d8];
+  }
+
+  .tag-manager-row:hover {
+    @apply bg-[#1b222b];
+  }
+
+  .user-tag {
+    @apply inline-flex min-h-5 w-fit max-w-full min-w-0 items-center rounded border border-white/15 px-1.5 text-[11px] font-semibold;
+  }
+
+  .mod-row .user-tag {
+    @apply max-w-[120px];
+  }
+
+  .user-tag > span {
+    @apply min-w-0 truncate;
+  }
+
+  .search-scope-box option {
+    @apply bg-[#0f141b] text-[#e8edf2];
+  }
+
+  .extra-tags {
+    @apply shrink-0 text-[11px] text-[#9aa7b6];
+  }
+
+  .tag-assignments {
+    @apply grid min-w-0 gap-2 border-y border-[#303a45] py-3;
+  }
+
+  .tag-section-heading,
+  .tag-section-heading strong {
+    @apply flex items-center gap-1.5 text-xs;
+  }
+
+  .tag-section-heading {
+    @apply justify-between text-[#aab6c4];
+  }
+
+  .tag-search {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .tag-search .search-box {
+    @apply h-9 text-xs;
+  }
+
+  .assignment-options {
+    @apply max-h-40 min-w-0 overflow-x-hidden overflow-y-auto;
+    scrollbar-gutter: stable;
+  }
+
+  .tag-option {
+    @apply grid min-h-8 min-w-0 cursor-pointer grid-cols-[16px_minmax(0,1fr)] items-center gap-2 py-1 text-xs;
+  }
+
+  .tag-assignments .user-tag > span {
+    @apply whitespace-normal;
+    overflow-wrap: anywhere;
+  }
+
+  .tag-empty {
+    @apply m-0 py-2 text-xs text-[#748293];
+  }
+
+  .tag-manager-heading {
+    @apply flex min-w-0 items-center gap-2.5;
+  }
+
+  .tag-manager-heading > span {
+    @apply whitespace-nowrap text-xs text-[#91a0b1];
+  }
+
+  .tag-manager-list {
+    @apply min-h-32 max-h-[min(400px,50vh)] min-w-0 overflow-auto;
+    scrollbar-gutter: stable;
+  }
+
+  .tag-manager-modal .search-box {
+    @apply h-9 flex-none text-[13px];
+  }
+
+  .search-box:focus-within {
+    @apply border-[#73a8d8];
+  }
+
+  .tag-manager-row {
+    @apply grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_34px_34px] items-center gap-2 border-b border-[#303a45] px-1.5 py-1.5;
+  }
+
+  .tag-manager-row:last-child {
+    @apply border-b-0;
+  }
+
+  .color-field {
+    @apply grid min-w-0 gap-2;
+  }
+
+  .color-field > span {
+    @apply text-xs font-bold text-[#9aa7b6];
+  }
+
+  .color-grid {
+    @apply grid grid-cols-7 gap-2;
+  }
+
+  .color-swatch,
+  .custom-color-swatch {
+    @apply relative grid h-9 min-w-0 cursor-pointer place-items-center rounded-md border border-[#303a45] text-[#101318] outline-0;
+  }
+
+  .color-swatch:hover,
+  .custom-color-swatch:focus-within {
+    @apply border-[#d7a84f];
+  }
+
+  .color-swatch.selected {
+    @apply border-[#f0d28f] shadow-[0_0_0_2px_rgba(215,168,79,0.3)];
+  }
+}
+
+@layer utilities {
+  .app-modal .search-box > input:not([type="checkbox"]):not([type="color"]) {
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .tag-option .checkbox {
+    height: 16px;
+    width: 16px;
+    min-height: 16px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .custom-color-swatch input[type="color"] {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+}

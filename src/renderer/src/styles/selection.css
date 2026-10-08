@@ -1,0 +1,51 @@
+@layer components {
+  .mod-context-menu {
+    @apply fixed z-[1050] w-60 max-w-[calc(100vw-16px)] overflow-hidden rounded-md border border-[#394553] bg-[#171d25] text-[#e8edf2] shadow-lg;
+    max-height: calc(100vh - 16px);
+  }
+
+  .mod-context-actions {
+    @apply w-full gap-1 p-1.5;
+  }
+
+  .mod-context-actions .menu-title {
+    @apply py-1.5 text-xs text-[#91a0b1];
+  }
+
+  .mod-context-actions button {
+    @apply flex w-full items-center gap-2 rounded px-2 py-2 text-[13px] transition-colors;
+  }
+
+  .mod-context-actions button:not(:disabled):hover,
+  .mod-context-actions button:not(:disabled):focus-visible {
+    @apply bg-white/10;
+  }
+
+  .mod-context-actions button:disabled {
+    @apply cursor-not-allowed opacity-45;
+  }
+
+  .mod-context-actions button:focus-visible {
+    @apply outline-2 outline-offset-[-2px] outline-[#d7a84f];
+  }
+
+  .mod-context-actions .context-subscribe {
+    @apply text-[#b8f1c5];
+  }
+
+  .mod-context-actions .context-unsubscribe {
+    @apply text-[#f9d6d6];
+  }
+
+  .bulk-tag-options {
+    @apply max-h-[min(320px,40vh)] min-w-0 overflow-auto;
+  }
+
+  .bulk-tag-option {
+    @apply grid-cols-[16px_minmax(0,1fr)_auto];
+  }
+
+  .bulk-tag-option small {
+    @apply text-[11px] text-[#91a0b1];
+  }
+}

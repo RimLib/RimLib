@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: dark --default;
+  logs: false;
+}
+@import "./custom.css";
+@import "./tags.css";
+@import "./tooltips.css";
+@import "./notifications.css";
+@import "./selection.css";
+@import "./drafts.css";

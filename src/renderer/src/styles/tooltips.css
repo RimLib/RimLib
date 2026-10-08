@@ -1,0 +1,40 @@
+@layer utilities {
+  .tooltip-action {
+    display: inline-flex;
+  }
+
+  .tooltip-overlay {
+    position: fixed;
+    z-index: 2000;
+    width: max-content;
+    max-width: min(320px, calc(100vw - 16px));
+    pointer-events: none;
+    --tt-bg: #10161d;
+  }
+
+  .tooltip-overlay::after {
+    display: none;
+  }
+
+  .tooltip-overlay > .tooltip-content {
+    position: static;
+    inset: auto;
+    transform: none;
+    width: auto;
+    max-width: inherit;
+    max-height: calc(100vh - 16px);
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    border: 1px solid #303a45;
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: #e8edf2;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: left;
+    opacity: 1;
+    transition: none;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34);
+  }
+}

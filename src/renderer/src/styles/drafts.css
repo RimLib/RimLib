@@ -1,0 +1,87 @@
+@layer components {
+  .draft-bar {
+    @apply flex min-h-[58px] items-center justify-between gap-4 border-t border-[#303a45] bg-[#171d25] px-3 py-2;
+  }
+  .draft-summary,
+  .draft-bar-actions {
+    @apply flex min-w-0 flex-wrap items-center gap-2;
+  }
+  .draft-summary strong {
+    @apply text-[13px];
+  }
+  .draft-bar-actions > button {
+    @apply px-3 text-[13px];
+  }
+  .draft-badge {
+    @apply inline-flex min-h-5 shrink-0 items-center rounded border px-1.5 text-[11px] font-bold;
+  }
+  .draft-subscribe {
+    @apply border-[#63946f] bg-[#203c2a] text-[#c4f3ce];
+  }
+  .draft-unsubscribe {
+    @apply border-[#ad8441] bg-[#382e1e] text-[#f7dfb1];
+  }
+  .draft-remove {
+    @apply border-[#a6656c] bg-[#40242d] text-[#ffd1d7];
+  }
+  .mod-row.pending-subscribe {
+    @apply border-l-[#63946f];
+  }
+  .mod-row.pending-unsubscribe {
+    @apply border-l-[#ad8441];
+  }
+  .mod-row.pending-remove {
+    @apply border-[#a6656c] bg-[#281b21];
+  }
+  .mod-row.pending-remove .mod-row-copy {
+    @apply opacity-65;
+  }
+  .draft-review-list {
+    @apply m-0 max-h-[36vh] min-w-0 list-none overflow-auto p-0;
+  }
+  .draft-review-list li {
+    @apply flex min-w-0 items-center gap-2 border-b border-[#303a45] py-2;
+  }
+  .draft-review-list li > div {
+    @apply min-w-0 flex-1;
+  }
+  .draft-review-list strong {
+    @apply block text-[13px];
+    overflow-wrap: anywhere;
+  }
+  .draft-review-list li > div > span {
+    @apply block text-xs text-[#91a0b1];
+    overflow-wrap: anywhere;
+  }
+  .draft-progress {
+    @apply grid gap-2;
+  }
+  .draft-steps {
+    @apply m-0 grid list-none gap-2 p-0 text-[13px];
+  }
+  .draft-steps li {
+    @apply flex items-center gap-2 text-[#91a0b1];
+  }
+  .draft-steps li.current {
+    @apply text-[#e8edf2];
+  }
+  .draft-steps li.complete {
+    @apply text-[#b8f1c5];
+  }
+  .draft-steps li.failed {
+    @apply text-[#ffd1d7];
+  }
+  .draft-step-marker {
+    @apply h-[17px] w-[17px] shrink-0 rounded-full border border-[#647383];
+  }
+}
+@layer utilities {
+  .modal .app-modal.draft-modal {
+    width: min(620px, calc(100% - 40px));
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+  }
+  .toast.error-notification-toast {
+    bottom: 70px;
+  }
+}

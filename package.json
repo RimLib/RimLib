@@ -1,0 +1,77 @@
+{
+  "name": "rimlib",
+  "productName": "RimLib",
+  "version": "0.1.0",
+  "description": "Electron TypeScript desktop app for preserving and classifying RimWorld Workshop mods.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:renderer": "vite --config vite.renderer.config.ts --host 127.0.0.1 --port 5173",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "node scripts/test.mjs",
+    "test:properties": "node scripts/test.mjs --properties",
+    "test:e2e": "node scripts/e2e.mjs",
+    "lint": "eslint . --max-warnings=0 --report-unused-disable-directives",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "migrate:vault:v3": "node scripts/migrate-vault-v2-to-v3.mjs",
+    "quality": "node scripts/quality.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
+  },
+  "engines": {
+    "node": ">=24.21.0 <25",
+    "npm": ">=11 <12"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "5.2.0",
+    "daisyui": "5.7.47",
+    "electron-vite": "5.0.0",
+    "fast-xml-parser": "5.11.2",
+    "fast-xml-validator": "1.4.2",
+    "firebase": "13.0.0",
+    "lucide-react": "1.53.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "steamworks.js": "0.4.0",
+    "zod": "4.6.5",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "44.7.0",
+    "esbuild": "0.28.2",
+    "eslint": "10.12.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-simple-import-sort": "14.0.0",
+    "fast-check": "4.10.2",
+    "globals": "17.13.0",
+    "husky": "9.1.7",
+    "prettier": "3.9.9",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1",
+    "vite": "7.3.7"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "@firebase/util": false,
+    "fsevents": false,
+    "protobufjs": false
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.5"
+  }
+}

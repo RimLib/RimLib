@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-electron
+out
+.DS_Store
+*.log
+*.local
+coverage/
+dist-types/
+.husky/_/
+*.tsbuildinfo
+playwright-report/
+test-results/
+.e2e-build/

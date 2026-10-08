@@ -1,0 +1,15 @@
+@layer utilities {
+  .error-notification .error-notification-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 800;
+    font-synthesis: weight;
+    line-height: 1.25;
+  }
+
+  .error-notification .error-notification-description {
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+}
