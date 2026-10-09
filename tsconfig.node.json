@@ -2,7 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": ["node", "electron"],
+    "types": ["node", "electron", "electron-vite/node"],
     "outDir": "dist-types/node"
   },
   "include": [

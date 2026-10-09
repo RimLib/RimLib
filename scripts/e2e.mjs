@@ -47,6 +47,19 @@ try {
     define: { __dirname: JSON.stringify(join(output, "app", "main")) },
     plugins: [
       {
+        name: "electron-vite-assets",
+        setup(builder) {
+          builder.onResolve({ filter: /\?asset$/ }, (args) => ({
+            path: resolve(args.resolveDir, args.path.slice(0, -"?asset".length)),
+            namespace: "electron-vite-asset",
+          }));
+          builder.onLoad({ filter: /.*/, namespace: "electron-vite-asset" }, (args) => ({
+            contents: `export default ${JSON.stringify(args.path)};`,
+            loader: "js",
+          }));
+        },
+      },
+      {
         name: "isolated-native-adapters",
         setup(builder) {
           builder.onResolve({ filter: /^\.\.?\// }, (args) => {

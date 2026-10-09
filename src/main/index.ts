@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 
+import rimLibAppIcon from "../../assets/rimlib-app-icon.png?asset";
 import { applicationName } from "../shared/application";
 import { hasConstantValue } from "../shared/domainConstants";
 import {
@@ -208,6 +209,7 @@ app.on("second-instance", () => {
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
     ...windowDefaults,
+    icon: rimLibAppIcon,
     title: applicationName,
     backgroundColor: "#101318",
     show: false,
@@ -342,6 +344,7 @@ app
     if (!singleInstance) {
       return;
     }
+    app.dock?.setIcon(rimLibAppIcon);
     log.info("app.ready", {
       locale: app.getLocale(),
       displays: screen

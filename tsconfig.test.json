@@ -3,7 +3,7 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["node", "electron", "vite/client"]
+    "types": ["node", "electron", "electron-vite/node", "vite/client"]
   },
   "include": ["tests/**/*.ts", "tests/**/*.tsx", "src/renderer/src/vite-env.d.ts"]
 }
