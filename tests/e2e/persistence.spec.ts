@@ -28,7 +28,9 @@ test("reopening resets workspace filters, focus, selection and menus while retai
   await desktop.subscribed
     .getByRole("combobox", { name: "Search workshop mods by" })
     .selectOption(searchScopes.tags);
-  await desktop.row(desktop.library, sampleMods.camera.name).click({ button: "right" });
+  const camera = desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main");
+  await expect(camera).toBeVisible();
+  await camera.dispatchEvent("contextmenu", { button: 2 });
   await expect(desktop.page.getByRole("menu")).toBeVisible();
   await desktop.reopen();
   await expect(desktop.library.getByRole("textbox", { name: "Search library mods" })).toHaveValue(
