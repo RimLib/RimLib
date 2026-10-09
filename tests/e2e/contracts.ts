@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 
@@ -30,11 +30,22 @@ export interface NativeCall {
   value: string;
 }
 
+function isSameDirectory(first: string, second: string): boolean {
+  const firstStats = statSync(first, { bigint: true });
+  const secondStats = statSync(second, { bigint: true });
+  return (
+    firstStats.isDirectory() &&
+    secondStats.isDirectory() &&
+    firstStats.dev === secondStats.dev &&
+    firstStats.ino === secondStats.ino
+  );
+}
+
 export function verifyFixture(root: string, token: string): string {
   const canonical = realpathSync(root);
   if (
     !isAbsolute(root) ||
-    dirname(canonical) !== realpathSync(tmpdir()) ||
+    !isSameDirectory(dirname(canonical), tmpdir()) ||
     !basename(canonical).startsWith(harness.prefix) ||
     !token ||
     readFileSync(join(canonical, harness.marker), "utf8") !== token

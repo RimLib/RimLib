@@ -5,7 +5,7 @@ import { ipcChannels } from "../../src/shared/ipc";
 import { sampleMods, sampleTags } from "./data";
 import { expect, test } from "./fixtures";
 
-test("reopening resets workspace filters, focus, selection and menus while retaining tags", async ({
+test("reopening resets workspace filters, focus and selection while retaining tags", async ({
   desktop,
 }) => {
   await desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main").click();
@@ -28,10 +28,6 @@ test("reopening resets workspace filters, focus, selection and menus while retai
   await desktop.subscribed
     .getByRole("combobox", { name: "Search workshop mods by" })
     .selectOption(searchScopes.tags);
-  const camera = desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main");
-  await expect(camera).toBeVisible();
-  await camera.dispatchEvent("contextmenu", { button: 2 });
-  await expect(desktop.page.getByRole("menu")).toBeVisible();
   await desktop.reopen();
   await expect(desktop.library.getByRole("textbox", { name: "Search library mods" })).toHaveValue(
     "",
@@ -53,10 +49,19 @@ test("reopening resets workspace filters, focus, selection and menus while retai
   ).toHaveValue(searchScopes.all);
   await expect(desktop.library.locator(".mod-row-main[aria-pressed=true]")).toHaveCount(0);
   await expect(desktop.subscribed.locator(".mod-row-main[aria-pressed=true]")).toHaveCount(0);
-  await expect(desktop.page.getByRole("menu")).toHaveCount(0);
   await expect(desktop.infoName).toHaveText(sampleMods.camera.name);
   await expect(desktop.info.getByRole("checkbox", { name: sampleTags.qol.name })).toBeChecked();
   expect((await desktop.mod(sampleMods.weapons.id)).userTagIds).toContain(sampleTags.qol.id);
+});
+
+test("reopening closes an open context menu", async ({ desktop }) => {
+  await desktop
+    .row(desktop.library, sampleMods.camera.name)
+    .locator(".mod-row-main")
+    .click({ button: "right" });
+  await expect(desktop.page.getByRole("menu")).toBeVisible();
+  await desktop.reopen();
+  await expect(desktop.page.getByRole("menu")).toHaveCount(0);
 });
 
 test("closing waits for pending autosaves and reopening restores tag edits", async ({
