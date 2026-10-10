@@ -282,6 +282,11 @@ On headless Linux, run the Electron suite with a virtual display:
 xvfb-run --auto-servernum npm run test:e2e
 ```
 
+## AI usage
+
+Most of the code in this project was generated with Codex. The overall architecture, technical
+decisions, and code reviews were led by a Staff Software Engineer.
+
 ## Project documentation
 
 - [Contributing](CONTRIBUTING.md) — toolchain, required checks, commit hooks, and change policy
