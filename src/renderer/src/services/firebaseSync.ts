@@ -26,6 +26,7 @@ import {
 import type { FirebaseSyncSettings, Mod, ModVault } from "../../../shared/types";
 import { isRecord } from "../../../shared/validation";
 import { effectiveSubscribedIds } from "../../../shared/vault";
+import { normalizeFirebaseSyncSettings } from "./firebaseSettings";
 
 const firebaseAppName = "rimlib-user-sync";
 const syncStatePrefix = "rimlib:firebase-sync:v1";
@@ -82,33 +83,6 @@ export interface FirebaseSyncResult {
 
 let session: FirebaseSession | undefined;
 
-function normalizedSettings(settings: FirebaseSyncSettings): FirebaseSyncSettings {
-  const next: FirebaseSyncSettings = {
-    enabled: settings.enabled,
-    apiKey: settings.apiKey.trim(),
-    authDomain: settings.authDomain.trim(),
-    projectId: settings.projectId.trim(),
-    appId: settings.appId.trim(),
-    email: settings.email.trim(),
-  };
-  if (
-    next.enabled &&
-    (!next.apiKey || !next.authDomain || !next.projectId || !next.appId || !next.email)
-  ) {
-    throw new Error("Complete every Firebase field before enabling sync.");
-  }
-  if (next.enabled && !/^\S+@\S+\.\S+$/.test(next.email)) {
-    throw new Error("Enter a valid Firebase account email address.");
-  }
-  return next;
-}
-
-export function normalizeFirebaseSyncSettings(
-  settings: FirebaseSyncSettings,
-): FirebaseSyncSettings {
-  return normalizedSettings(settings);
-}
-
 function configurationKey(settings: FirebaseSyncSettings) {
   return `${settings.projectId}\n${settings.apiKey}\n${settings.appId}\n${settings.authDomain}\n${settings.email.toLowerCase()}`;
 }
@@ -145,7 +119,7 @@ export async function connectFirebase(
   rawSettings: FirebaseSyncSettings,
   password: string,
 ): Promise<string> {
-  const settings = normalizedSettings(rawSettings);
+  const settings = normalizeFirebaseSyncSettings(rawSettings);
   const key = configurationKey(settings);
   try {
     if (session?.key !== key) {

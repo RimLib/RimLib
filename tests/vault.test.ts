@@ -259,3 +259,53 @@ void test("guarded atomic writes do not replace a changed file and clean up temp
     assert.equal(await readFile(path, "utf8"), "external change");
     assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
   }));
+
+void test("guarded atomic writes never replace an external pathname created at the commit boundary", async () =>
+  temporary(async (path) => {
+    await writeFile(path, "old data");
+    await assert.rejects(
+      atomicWrite(path, "our data", {
+        expected: "old data",
+        beforePublish: async (claimedPath) => {
+          assert.ok(claimedPath);
+          await writeFile(path, "external change");
+        },
+      }),
+      /outside/,
+    );
+    assert.equal(await readFile(path, "utf8"), "external change");
+    assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
+  }));
+
+void test("guarded atomic writes restore an edit made to the claimed file before publication", async () =>
+  temporary(async (path) => {
+    await writeFile(path, "old data");
+    await assert.rejects(
+      atomicWrite(path, "our data", {
+        expected: "old data",
+        beforePublish: async (claimedPath) => {
+          assert.ok(claimedPath);
+          await writeFile(claimedPath, "external change");
+        },
+      }),
+      /outside/,
+    );
+    assert.equal(await readFile(path, "utf8"), "external change");
+    assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
+  }));
+
+void test("guarded creation never replaces a file created at the commit boundary", async () =>
+  temporary(async (path) => {
+    await assert.rejects(
+      atomicWrite(path, "our data", {
+        expected: undefined,
+        beforePublish: async (claimedPath) => {
+          assert.equal(claimedPath, undefined);
+          await writeFile(path, "external creation");
+        },
+      }),
+      /outside/,
+    );
+    assert.equal(await readFile(path, "utf8"), "external creation");
+    assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
+  }));

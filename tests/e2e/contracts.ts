@@ -21,6 +21,7 @@ export interface Controls {
   ipcErrors: Partial<Record<IpcChannel, string>>;
   ipcDelays: Partial<Record<IpcChannel, number>>;
   metadataStatus: number;
+  metadataOmitIds: string[];
   cancelDialog: boolean;
   shellError: string;
 }

@@ -109,7 +109,10 @@ void test("property: authorized library deletion checkpoints the complete vault 
           const targets = before.mods
             .filter((_, index) => index === 0 || ((mask >>> index) & 1) !== 0)
             .map((mod) => mod.id);
-          const deleted = await deleteLibraryMods(store, targets);
+          const deleted = await deleteLibraryMods(store, targets, async () => ({
+            packageIds: ["ludeon.rimworld"],
+            installedMods: [],
+          }));
           const backups = await readdir(join(dirname(path), vaultBackupDirectory));
           assert.equal(backups.length, 1);
           const checkpoint: unknown = JSON.parse(

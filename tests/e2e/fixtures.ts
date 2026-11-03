@@ -8,6 +8,7 @@ import {
   realpath,
   rename,
   rm,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,7 +29,7 @@ import { requireValue } from "../../src/shared/validation";
 import { normalizeVault, serializeVault } from "../../src/shared/vault";
 import { vaultSchemaVersion } from "../../src/shared/vaultValidation";
 import { type Controls, harness, type NativeCall, verifyFixture } from "./contracts";
-import { aboutXml, configXml, initialSubscribedIds, sampleVault } from "./data";
+import { aboutXml, configXml, initialSubscribedIds, modListXml, sampleVault } from "./data";
 
 export type Scenario =
   "populated" | "empty" | "corrupt" | "future" | "offline" | "disconnected" | "large";
@@ -37,8 +38,11 @@ export class Desktop {
   readonly token = randomUUID();
   readonly errors: string[] = [];
   readonly config: string;
+  readonly game: string;
   readonly workshop: string;
   readonly database: string;
+  readonly modListImport: string;
+  readonly modListExport: string;
   private application?: ElectronApplication;
   private window?: Page;
   private launches = 0;
@@ -49,6 +53,7 @@ export class Desktop {
     private artifactPath: (name: string) => string,
   ) {
     this.config = join(root, "game-config", "ModsConfig.xml");
+    this.game = join(root, "RimWorld");
     this.workshop = join(
       root,
       "Steam library with spaces",
@@ -58,6 +63,8 @@ export class Desktop {
       "294100",
     );
     this.database = join(root, "user-data", vaultFileName);
+    this.modListImport = join(root, "mod-lists", "import.xml");
+    this.modListExport = join(root, "mod-lists", "export.xml");
   }
 
   get app(): ElectronApplication {
@@ -68,12 +75,21 @@ export class Desktop {
     return requireValue(this.window);
   }
 
+  get inactive(): Locator {
+    return this.page.locator('section[aria-label="Library mods"]');
+  }
+
+  get active(): Locator {
+    return this.page.locator('section[aria-label="Active mods"]');
+  }
+
+  // Compatibility aliases for E2E areas that have not yet adopted activity terminology.
   get library(): Locator {
-    return this.page.locator(".unsubscribed-panel");
+    return this.inactive;
   }
 
   get subscribed(): Locator {
-    return this.page.locator(".subscribed-panel");
+    return this.active;
   }
 
   get info(): Locator {
@@ -95,6 +111,8 @@ export class Desktop {
       join(this.root, "session"),
       join(this.root, "logs"),
       join(this.root, "game-config"),
+      join(this.root, "mod-lists"),
+      join(this.game, "Data", "Core", "About"),
       this.workshop,
     ]) {
       await mkdir(path, { recursive: true });
@@ -119,7 +137,19 @@ export class Desktop {
     for (const mod of vault.mods.filter((entry) => entry.subscribed)) {
       await this.install(mod);
     }
+    await writeFile(
+      join(this.game, "Data", "Core", "About", "About.xml"),
+      "<ModMetaData><name>Core</name><author>Ludeon Studios</author><packageId>ludeon.rimworld</packageId><description>RimWorld core content.</description></ModMetaData>",
+    );
+    await writeFile(
+      join(this.game, "Data", "Core", "About", "Preview.png"),
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
     await writeFile(this.config, configXml());
+    await writeFile(this.modListImport, modListXml());
     await writeFile(
       this.database,
       scenario === "corrupt"
@@ -138,6 +168,7 @@ export class Desktop {
       ipcErrors: {},
       ipcDelays: {},
       metadataStatus: 200,
+      metadataOmitIds: [],
       cancelDialog: false,
       shellError: "",
     };
@@ -148,9 +179,16 @@ export class Desktop {
   }
 
   async install(mod: Mod): Promise<void> {
-    const path = join(this.workshop, requireValue(mod.workshopId), "About");
-    await mkdir(path, { recursive: true });
-    await writeFile(join(path, "About.xml"), aboutXml(mod));
+    const folder = join(this.workshop, requireValue(mod.workshopId));
+    const about = join(folder, "About");
+    await mkdir(about, { recursive: true });
+    await writeFile(join(about, "About.xml"), aboutXml(mod));
+    const installedAt = new Date(mod.downloadedAt);
+    if (Number.isFinite(installedAt.getTime())) {
+      // The production scanner treats the Workshop folder mtime as the local install/update time.
+      // Pin it after writing About.xml so Newest-first E2E expectations are deterministic.
+      await utimes(folder, installedAt, installedAt);
+    }
   }
 
   async launch(): Promise<void> {
@@ -226,12 +264,23 @@ export class Desktop {
     await dialog.getByRole("button", { name: /^Apply \d+ changes?$/ }).click();
     const applying = this.page.getByRole("dialog", { name: "Apply changes", exact: true });
     await expect(
-      applying.getByText("Changes applied; RimWorld configuration unchanged", { exact: true }),
+      applying.getByText(/^Changes applied(?:; RimWorld active configuration updated)?$/),
     ).toBeVisible();
     await applying
       .locator(".app-modal-actions")
       .getByRole("button", { name: "Close", exact: true })
       .click();
+  }
+
+  async activePackageIds(): Promise<string[]> {
+    const raw = await readFile(this.config, "utf8");
+    const content = requireValue(
+      /<activeMods\b[^>]*>([\s\S]*?)<\/activeMods\s*>/.exec(raw)?.[1],
+      "Fixture ModsConfig.xml is missing activeMods",
+    );
+    return [...content.matchAll(/<li>([^<]+)<\/li>/g)].map((match) =>
+      requireValue(match[1]).trim(),
+    );
   }
 
   async vault(): Promise<ModVault> {

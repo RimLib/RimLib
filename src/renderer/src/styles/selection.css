@@ -29,11 +29,13 @@
     @apply outline-2 outline-offset-[-2px] outline-[#d7a84f];
   }
 
-  .mod-context-actions .context-subscribe {
+  .mod-context-actions .context-subscribe,
+  .mod-context-actions .context-activate {
     @apply text-[#b8f1c5];
   }
 
-  .mod-context-actions .context-unsubscribe {
+  .mod-context-actions .context-unsubscribe,
+  .mod-context-actions .context-deactivate {
     @apply text-[#f9d6d6];
   }
 

@@ -1,5 +1,5 @@
 import { modActivities, steamStatusSources } from "../../../shared/domainConstants";
-import { normalizePackageId } from "../../../shared/packages";
+import { isOfficialMod, isUsablePackageId, normalizePackageId } from "../../../shared/packages";
 import {
   createActivityLookup,
   isWorkshopMod,
@@ -14,9 +14,107 @@ import type {
 } from "../../../shared/types";
 import { requireValue } from "../../../shared/validation";
 import { effectiveSubscribedIds, reconcileLocalSteamState } from "../../../shared/vault";
-import { type ModSort, modSorts, type SearchScope, searchScopes } from "./uiConstants";
+import {
+  type ModSort,
+  modSorts,
+  type ModTagFilter,
+  modTagFilters,
+  type SearchScope,
+  searchScopes,
+} from "./uiConstants";
 
 export type { ModSort } from "./uiConstants";
+
+export function matchesModTagFilter(
+  mod: Pick<Mod, "userTagIds">,
+  tagFilter: ModTagFilter,
+): boolean {
+  if (tagFilter === modTagFilters.all) {
+    return true;
+  }
+  if (tagFilter === modTagFilters.untagged) {
+    return !mod.userTagIds?.length;
+  }
+  return Boolean(mod.userTagIds?.includes(tagFilter));
+}
+
+export function filterModsByTag(mods: readonly Mod[], tagFilter: ModTagFilter): Mod[] {
+  return mods.filter((mod) => matchesModTagFilter(mod, tagFilter));
+}
+
+function parsedTimestamp(value: string | undefined): number {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+/** Latest meaningful point at which this mod was added, installed locally, or updated upstream. */
+export function modInstalledOrUpdatedAt(
+  mod: Pick<Mod, "addedAt" | "downloadedAt" | "steamUpdatedAt">,
+): number {
+  return Math.max(
+    parsedTimestamp(mod.addedAt),
+    parsedTimestamp(mod.downloadedAt),
+    parsedTimestamp(mod.steamUpdatedAt),
+  );
+}
+
+/** Stable-prepend matching rows without changing the order of the remaining Library results. */
+export function promoteModsToFront(mods: Mod[], priorityIds?: readonly string[]): Mod[] {
+  if (!priorityIds?.length || !mods.length) {
+    return mods;
+  }
+  const byId = new Map(mods.map((mod) => [mod.id, mod]));
+  const promoted: Mod[] = [];
+  const promotedIds = new Set<string>();
+  for (const id of priorityIds) {
+    const mod = byId.get(id);
+    if (mod && !promotedIds.has(id)) {
+      promoted.push(mod);
+      promotedIds.add(id);
+    }
+  }
+  return promoted.length ? [...promoted, ...mods.filter((mod) => !promotedIds.has(mod.id))] : mods;
+}
+
+export type ModPriorityIdentity = Pick<Mod, "id" | "packageId">;
+
+/** Resolve a transient row identity after installed metadata replaces a package placeholder. */
+export function resolveModPriorityId(
+  mods: readonly Mod[],
+  priority: ModPriorityIdentity,
+): string | undefined {
+  if (mods.some((mod) => mod.id === priority.id)) {
+    return priority.id;
+  }
+  if (!isUsablePackageId(priority.packageId)) {
+    return undefined;
+  }
+  const packageId = normalizePackageId(priority.packageId);
+  const matches = mods.filter(
+    (mod) => isUsablePackageId(mod.packageId) && normalizePackageId(mod.packageId) === packageId,
+  );
+  return matches.length === 1 ? matches[0]?.id : undefined;
+}
+
+function compareModIds(left: Mod, right: Mod): number {
+  if (left.id < right.id) {
+    return -1;
+  }
+  return left.id > right.id ? 1 : 0;
+}
+
+/**
+ * Metadata-dependent actions cannot safely identify these entries. Installed local mods also use
+ * the `active-package:` ID namespace, so only entries without a local path are placeholders.
+ */
+export function isModMetadataUnavailable(
+  mod: Pick<Mod, "id" | "localPath" | "packageId" | "workshopId">,
+): boolean {
+  return (
+    !isUsablePackageId(mod.packageId) ||
+    (mod.id.startsWith("active-package:") && !mod.localPath && !isOfficialMod(mod))
+  );
+}
 
 export function applyWorkshopStatus(vault: ModVault, snapshot: WorkshopStatusSnapshot): ModVault {
   if (
@@ -41,6 +139,7 @@ export function filterLibrary(
   sort: ModSort,
   userTags: readonly ModTag[] = [],
   activeOrder: ReadonlyMap<string, number> = new Map(),
+  invalidModIds: ReadonlySet<string> = new Set(),
 ) {
   const search = query.trim().toLowerCase();
   const userTagNames = new Map(userTags.map((tag) => [tag.id, tag.name.toLowerCase()]));
@@ -65,16 +164,38 @@ export function filterLibrary(
     return candidates.some((value) => value.toLowerCase().includes(search));
   };
   return mods.filter(matchesSearch).sort((a, b) => {
-    if (sort === modSorts.active) {
+    if (sort === modSorts.notSubscribed) {
+      const subscriptionDifference = Number(a.subscribed) - Number(b.subscribed);
+      if (subscriptionDifference) {
+        return subscriptionDifference;
+      }
+    }
+    if (sort === modSorts.invalid) {
+      const activeValidationDifference =
+        Number(invalidModIds.has(b.id)) - Number(invalidModIds.has(a.id));
+      if (activeValidationDifference) {
+        return activeValidationDifference;
+      }
+      const invalidDifference =
+        Number(isModMetadataUnavailable(b)) - Number(isModMetadataUnavailable(a));
+      if (invalidDifference) {
+        return invalidDifference;
+      }
+    }
+    if (
+      sort === modSorts.active ||
+      sort === modSorts.loadOrder ||
+      (sort === modSorts.invalid && activeOrder.size > 0)
+    ) {
       const difference = (activeOrder.get(a.id) ?? Infinity) - (activeOrder.get(b.id) ?? Infinity);
       if (difference && !Number.isNaN(difference)) {
         return difference;
       }
     }
-    return (
+    const recencyDifference =
       (sort === modSorts.oldest ? 1 : -1) *
-      ((Date.parse(a.downloadedAt) || 0) - (Date.parse(b.downloadedAt) || 0))
-    );
+      (modInstalledOrUpdatedAt(a) - modInstalledOrUpdatedAt(b));
+    return recencyDifference || compareModIds(a, b);
   });
 }
 
@@ -124,14 +245,38 @@ export function subscriptionPanels(
   return { unsubscribed, subscribed, activeIds, activeOrder };
 }
 
+/** Partition the complete known mod universe by RimWorld activity, not Steam subscription. */
+export function activityPanels(
+  vault: Pick<ModVault, "localSteamState">,
+  allEntries: readonly Mod[],
+  activeEntries: readonly Mod[],
+) {
+  const live = effectiveSubscribedIds(vault.localSteamState);
+  const withSubscription = (mod: Mod): Mod =>
+    mod.workshopId && mod.subscribed !== live.has(mod.workshopId)
+      ? { ...mod, subscribed: live.has(mod.workshopId) }
+      : mod;
+  const all = new Map(allEntries.map((mod) => [mod.id, withSubscription(mod)]));
+  for (const workshopId of live) {
+    const id = `steam-${workshopId}`;
+    if (!all.has(id)) {
+      all.set(id, workshopPlaceholder(workshopId));
+    }
+  }
+  const activeMods = activeEntries.map((entry) =>
+    withSubscription(isOfficialMod(entry) ? entry : (all.get(entry.id) ?? entry)),
+  );
+  const activeIds = new Set(activeMods.map((mod) => mod.id));
+  const inactive = [...all.values()].filter((mod) => !activeIds.has(mod.id));
+  const activeOrder = new Map(activeMods.map((mod, index) => [mod.id, index + 1]));
+  return { inactive, active: activeMods, activeIds, activeOrder };
+}
+
 export function modBatchAvailability(
   mods: Mod[],
   savedIds: ReadonlySet<string>,
   busy: boolean,
-  subscriptionDisabled: boolean,
-  subscriptionReason?: string,
   activeIds: ReadonlySet<string> = new Set(),
-  activeError?: string,
 ) {
   const tagsDisabledReason = busy
     ? "An operation is in progress"
@@ -147,13 +292,14 @@ export function modBatchAvailability(
       ? "Local mods do not have Steam subscriptions"
       : unsubscribing && mods.some((mod) => activeIds.has(mod.id))
         ? "Active mods cannot be unsubscribed"
-        : unsubscribing && activeError
-          ? "Active status could not be verified. Unsubscribe is disabled."
-          : subscriptionDisabled
-            ? (subscriptionReason ?? "Subscription changes are unavailable")
-            : undefined);
+        : undefined);
+  const subscribedRemovalTargets = mods.filter((mod) => mod.subscribed);
   const removalDisabledReason =
     tagsDisabledReason ??
-    (unsubscribing ? "Unsubscribe these mods before removing them from the library" : undefined);
+    (subscribedRemovalTargets.some((mod) => !isWorkshopMod(mod))
+      ? "Only Workshop mods can be unsubscribed before removal"
+      : subscribedRemovalTargets.some((mod) => activeIds.has(mod.id))
+        ? "Active mods cannot be unsubscribed"
+        : undefined);
   return { tagsDisabledReason, subscriptionDisabledReason, removalDisabledReason };
 }

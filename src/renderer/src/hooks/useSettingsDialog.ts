@@ -18,7 +18,7 @@ interface SettingsDialogDependencies {
   busy: boolean;
   run: <T>(action: () => Promise<T>) => Promise<T>;
   adopt: (vault: ModVault) => void;
-  adoptActive: (active: ActiveModsState) => void;
+  adoptActive: (active: ActiveModsState, preserveInstalled?: boolean) => void;
   notifyError: (error: unknown) => void;
   perform: ReturnType<typeof useActionNotifications>["perform"];
   setNotice: (message: string) => void;
@@ -219,7 +219,8 @@ export function useSettingsDialog({
           try {
             const result = await getStore().refreshSubscriptions();
             adopt(result.vault);
-            adoptActive(result.activeMods);
+            // Paths changed, so metadata from the previous Workshop root must not remain visible.
+            adoptActive(result.activeMods, false);
             if (result.failures.length) {
               setNotice("Settings saved; some Workshop updates failed");
               notifyError(result.failures.join("; "));

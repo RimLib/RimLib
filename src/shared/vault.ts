@@ -110,7 +110,7 @@ export function reconcileLocalSteamState(vault: ModVault, nextState: LocalSteamS
 function fromStoredVault(vault: StoredVault): ModVault {
   const subscribedIds = effectiveSubscribedIds(vault.deviceState.steam);
   const { mods: _storedMods, tags: _storedTags, ...libraryExtensions } = vault.library;
-  const { steam: _steam, ...deviceStateExtensions } = vault.deviceState;
+  const { steam: _steam, pendingDraft, ...deviceStateExtensions } = vault.deviceState;
   const {
     library: _library,
     deviceState: _deviceState,
@@ -134,6 +134,7 @@ function fromStoredVault(vault: StoredVault): ModVault {
     mods: vault.library.mods.map((mod) => normalizeMod(mod, subscribedIds)),
     userTags: vault.library.tags,
     localSteamState: vault.deviceState.steam,
+    pendingDraft,
   });
 }
 
@@ -177,8 +178,8 @@ export function normalizeVault(value: unknown): ModVault {
   if (isStoredVault(value)) {
     return fromStoredVault(parseStoredVault(value));
   }
-  // Runtime state is validated through the persisted representation. This is not a v2 reader:
-  // VaultStore always parses disk input with parseStoredVault before it reaches this branch.
+  // Runtime state is validated through the persisted representation. Stored database objects
+  // take the branch above, so this remains a runtime-state path rather than a legacy reader.
   if (!isRecord(value)) {
     throw new Error("Invalid mod database. Database writes have been blocked.");
   }
@@ -242,6 +243,7 @@ export function serializeVault(vault: ModVault): StoredVault {
     mods: _mods,
     userTags: _userTags,
     localSteamState: _localSteamState,
+    pendingDraft,
     deviceState: _deviceState,
     libraryExtensions,
     deviceStateExtensions,
@@ -269,6 +271,7 @@ export function serializeVault(vault: ModVault): StoredVault {
         observedIds: [...new Set(vault.localSteamState.observedIds)],
         pending: { ...vault.localSteamState.pending },
       },
+      ...(pendingDraft === undefined ? {} : { pendingDraft }),
     },
   };
 }

@@ -18,6 +18,21 @@ export interface ModDependency {
   gameVersions?: string[];
 }
 
+export interface ModVersionedDependencies {
+  gameVersion: string;
+  dependencies: ModDependency[];
+}
+
+export interface ModLoadRule {
+  packageId: string;
+  gameVersions?: string[];
+}
+
+export interface ModVersionedLoadRules {
+  gameVersion: string;
+  rules: ModLoadRule[];
+}
+
 export interface Mod {
   id: string;
   workshopId?: string;
@@ -28,6 +43,13 @@ export interface Mod {
   source: ModSource;
   summary: string;
   dependencies?: ModDependency[];
+  dependenciesByVersion?: ModVersionedDependencies[];
+  loadAfter?: ModLoadRule[];
+  loadAfterByVersion?: ModVersionedLoadRules[];
+  forceLoadAfter?: ModLoadRule[];
+  loadBefore?: ModLoadRule[];
+  loadBeforeByVersion?: ModVersionedLoadRules[];
+  forceLoadBefore?: ModLoadRule[];
   gameVersions: string[];
   tags: string[];
   userTagIds?: string[];
@@ -74,6 +96,57 @@ export interface LocalSteamState {
   pending: Record<string, SubscriptionCommand>;
 }
 
+/**
+ * Device-local, unapplied work. These records intentionally contain only the identity and display
+ * fields needed to recover a draft; library notes, descriptions and images are never duplicated.
+ */
+export type PendingDraftAction = "subscribe" | "unsubscribe" | "activate" | "deactivate" | "remove";
+
+export interface PendingDraftTarget {
+  id: string;
+  name: string;
+  source: ModSource;
+  packageId?: string;
+  workshopId?: string;
+  localPath?: string;
+}
+
+export interface PendingDraftChange {
+  action: PendingDraftAction;
+  target: PendingDraftTarget;
+}
+
+interface PendingDraftOrderMove {
+  id: string;
+  packageId: string;
+  modId: string;
+  modName: string;
+  fromPosition: number;
+  toPosition: number;
+}
+
+export type PendingDraftOrderOperation = PendingDraftOrderMove &
+  (
+    | { kind: "auto-sort" }
+    | { kind: "import"; fileName: string }
+    | { kind: "manual"; method: "drag" | "position" }
+  );
+
+export interface PendingDraftOperationMembership {
+  operationId: string;
+  packageIds: string[];
+}
+
+export interface PendingDraft {
+  version: 1;
+  changes: PendingDraftChange[];
+  activeOrder?: string[];
+  activeOrderOperations: PendingDraftOrderOperation[];
+  activeBasePackageIds?: string[];
+  activeBaseConfigTarget?: string;
+  operationMemberships: PendingDraftOperationMembership[];
+}
+
 /** Normalized application state. The persisted v3 vault is produced by serializeVault. */
 export interface ModVault {
   [key: string]: unknown;
@@ -89,6 +162,8 @@ export interface ModVault {
   revision?: string;
   userTags: ModTag[];
   localSteamState: LocalSteamState;
+  /** Unapplied device-bound operations; excluded from portable Firebase records. */
+  pendingDraft?: PendingDraft;
 }
 
 export interface ModTag {
@@ -137,8 +212,20 @@ export interface WorkshopStatusSnapshot {
 export interface InstalledModMetadata {
   packageId: string;
   localPath: string;
+  /** Last modification time of the installed mod folder, when the filesystem exposes it. */
+  downloadedAt?: string;
+  /** Set only by the main-process scanner for exact packages in their matching game Data folder. */
+  officialContent?: boolean;
   workshopId?: string;
+  thumbnail?: string;
   dependencies?: ModDependency[];
+  dependenciesByVersion?: ModVersionedDependencies[];
+  loadAfter?: ModLoadRule[];
+  loadAfterByVersion?: ModVersionedLoadRules[];
+  forceLoadAfter?: ModLoadRule[];
+  loadBefore?: ModLoadRule[];
+  loadBeforeByVersion?: ModVersionedLoadRules[];
+  forceLoadBefore?: ModLoadRule[];
   name?: string;
   author?: string;
   summary?: string;
@@ -159,6 +246,8 @@ export interface SteamOperationResult {
   unsubscribed: number;
   failures: string[];
   warnings?: string[];
+  /** Folder-access warnings that should remain visible as Workshop availability status. */
+  folderWarnings?: string[];
 }
 
 export interface SteamStatus {
@@ -170,9 +259,29 @@ export interface VaultSaveOptions {
   deletedTagIds?: string[];
 }
 
+export interface ImportedModList {
+  fileName: string;
+  gameVersion?: string;
+  packageIds: string[];
+  knownExpansions: string[];
+}
+
+export interface ModListExportRequest {
+  gameVersion: string;
+  packageIds: string[];
+}
+
+export interface ModListExportResult {
+  fileName: string;
+  packageCount: number;
+}
+
 export interface ModStoreApi {
   openLogs: () => Promise<void>;
   openDatabaseFolder: () => Promise<void>;
+  launchRimWorld: () => Promise<void>;
+  importModList: () => Promise<ImportedModList | null>;
+  exportModList: (request: ModListExportRequest) => Promise<ModListExportResult | null>;
   revealModFolder: (modId: string) => Promise<void>;
   openWorkshopInBrowser: (workshopId: string) => Promise<void>;
   load: () => Promise<ModVault>;
@@ -187,7 +296,17 @@ export interface ModStoreApi {
   refreshSubscriptions: () => Promise<SteamOperationResult>;
   inspectWorkshopStatus: () => Promise<WorkshopStatusSnapshot>;
   getSteamStatus: () => Promise<SteamStatus>;
+  getActiveModConfiguration: (settings?: AppSettings) => Promise<ActiveModsState>;
+  getInstalledMods: (
+    settings?: AppSettings,
+    forceRefresh?: boolean,
+  ) => Promise<InstalledModMetadata[]>;
   getActiveMods: (settings?: AppSettings) => Promise<ActiveModsState>;
+  setActiveMods: (
+    settings: AppSettings | undefined,
+    packageIds: string[],
+    expectedPackageIds: string[],
+  ) => Promise<ActiveModsState>;
   previewLibrarySubscriptions: (
     action: SubscriptionAction,
     modIds: string[],

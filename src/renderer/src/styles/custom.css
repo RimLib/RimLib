@@ -138,6 +138,10 @@
     @apply cursor-not-allowed opacity-45;
   }
 
+  .action-unavailable[aria-disabled="true"] {
+    @apply cursor-not-allowed opacity-45;
+  }
+
   .count-badge {
     @apply inline-flex h-[34px] items-center justify-center rounded-md border border-[#303a45] bg-[#1b222b] px-2.5 text-xs font-bold leading-none text-[#aeb9c7];
   }
@@ -156,6 +160,7 @@
 
   .search-box,
   .search-scope-box,
+  .tag-filter-box,
   .sort-box {
     @apply flex min-h-9 items-center gap-2 rounded-md border border-[#303a45] bg-[#0f141b] text-[#8f9cab];
   }
@@ -165,12 +170,9 @@
   }
 
   .search-scope-box,
+  .tag-filter-box,
   .sort-box {
-    @apply relative block h-9 w-[156px] shrink-0 p-0;
-  }
-
-  .search-scope-box {
-    @apply w-[136px];
+    @apply relative block h-9 w-full shrink-0 p-0;
   }
 
   .select-leading-icon,
@@ -201,6 +203,7 @@
 
   .search-box input,
   .search-scope-box select,
+  .tag-filter-box select,
   .sort-box select,
   .app-modal input:not([type="checkbox"]):not([type="color"]),
   .app-modal textarea {
@@ -208,6 +211,7 @@
   }
 
   .search-scope-box select,
+  .tag-filter-box select,
   .sort-box select {
     appearance: none;
   }
@@ -247,7 +251,7 @@
   }
 
   .mod-visual > svg,
-  .mod-visual > span,
+  .mod-visual > .mod-source,
   .thumb > svg {
     @apply relative z-[1];
   }
@@ -256,8 +260,8 @@
     @apply absolute inset-0 h-full w-full object-cover;
   }
 
-  .mod-visual > span {
-    @apply rounded-md border border-white/15 bg-black/25 px-2 py-1 text-xs font-bold text-[#f6f7f2];
+  .mod-visual > .mod-source {
+    @apply absolute top-2 right-2 rounded-md border border-white/15 bg-black/55 px-2 py-1 text-xs font-bold text-[#f6f7f2];
   }
 
   .info-heading {
@@ -273,12 +277,16 @@
     @apply shrink-0 rounded-[5px] px-2 py-1 text-xs font-bold;
   }
 
-  .mod-subscription-status.active {
+  .mod-subscription-status.subscribed {
     @apply bg-[#7fbf90] text-[#102116];
   }
 
-  .mod-subscription-status.saved {
+  .mod-subscription-status.not-subscribed {
     @apply bg-[#d7a84f] text-[#1f1b12];
+  }
+
+  .summary-block {
+    @apply min-w-0;
   }
 
   .summary {
@@ -286,21 +294,61 @@
     overflow-wrap: anywhere;
   }
 
-  .dependency-warning {
+  .summary-clamped {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+  }
+
+  .summary-toggle {
+    @apply mt-1 inline-flex items-center gap-0.5 border-0 bg-transparent p-0 text-[11px] font-bold text-[#83b9e8];
+  }
+
+  .summary-toggle:hover {
+    @apply text-[#b7d9f5];
+  }
+
+  .summary-toggle:focus-visible {
+    @apply rounded-sm outline-2 outline-offset-2 outline-[#83b9e8];
+  }
+
+  .dependency-warning,
+  .validation-warning {
     @apply flex items-start gap-2 rounded-md border border-[#a85c66] bg-[#3b2229] p-2.5 text-xs text-[#ffd5d5];
   }
 
-  .dependency-warning > svg {
+  .dependency-warning > svg,
+  .validation-warning > svg {
     @apply mt-0.5 shrink-0 text-[#f2a0aa];
   }
 
-  .dependency-warning > div {
+  .dependency-warning > div,
+  .validation-warning > div {
     @apply grid min-w-0 gap-0.5;
   }
 
   .dependency-warning strong,
-  .dependency-warning span {
+  .dependency-warning span,
+  .validation-warning strong,
+  .validation-warning li {
     overflow-wrap: anywhere;
+  }
+
+  .validation-warning ul {
+    @apply m-0 grid gap-1 pl-4;
+  }
+
+  .dependency-fix-action {
+    @apply mt-1 inline-flex w-fit items-center gap-1 rounded border border-[#c87883] bg-[#542f38] px-2 py-1 text-[11px] font-bold text-[#ffe1e4];
+  }
+
+  .dependency-fix-action:hover:not(:disabled) {
+    @apply border-[#e59aa4] bg-[#673a44];
+  }
+
+  .dependency-fix-action:disabled {
+    @apply cursor-not-allowed opacity-50;
   }
 
   .dependency-section {
@@ -350,7 +398,12 @@
   }
 
   .action-row {
-    @apply grid grid-cols-1 gap-2;
+    @apply flex flex-wrap gap-2;
+  }
+
+  .action-row > button {
+    @apply min-w-0 px-2 text-xs;
+    flex: 1 1 112px;
   }
 
   .metadata-list {
@@ -384,8 +437,8 @@
     @apply inline-flex min-h-6 items-center gap-1 whitespace-nowrap rounded-[5px] border border-[#313c48] bg-[#202832] px-2 py-1 text-xs not-italic text-[#cbd6e2];
   }
 
-  .active-pill {
-    @apply inline-flex w-fit items-center gap-1 rounded border border-[#648fba] bg-[#25394b] px-1.5 py-0.5 text-[11px] text-[#aacdec];
+  .official-marker {
+    @apply inline-flex w-fit shrink-0 items-center gap-1 text-[11px] font-semibold text-[#83b9e8];
   }
 
   .unsubscribed-pill {
@@ -405,11 +458,63 @@
   }
 
   .library-toolbar {
-    @apply flex items-center gap-2 border-b border-[#252f3a] px-3 py-2.5;
+    @apply grid grid-cols-3 items-center gap-2 border-b border-[#252f3a] px-3 py-2.5;
+  }
+
+  .library-toolbar .search-box {
+    grid-column: 1 / -1;
   }
 
   .selection-status {
     @apply flex min-h-9 items-center justify-between gap-2 border-t border-[#303a45] px-3 text-xs text-[#9aa7b6];
+  }
+
+  .mod-status-filters {
+    @apply flex min-w-0 shrink-0 items-center gap-1.5;
+  }
+
+  .mod-status-filter {
+    @apply inline-flex min-h-6 items-center gap-1 rounded-full border border-[#3a4653] bg-[#1b222b] px-2 text-[11px] font-bold text-[#aeb9c7] transition-colors;
+  }
+
+  .mod-status-filter.invalid {
+    @apply border-[#8f4a55] bg-[#3a2028] text-[#ffd5d5];
+  }
+
+  .mod-status-filter.removed {
+    @apply border-[#866439] bg-[#332718] text-[#f8d9a7];
+  }
+
+  .mod-status-filter.new {
+    @apply border-[#3f745c] bg-[#193126] text-[#bce9cf];
+  }
+
+  .mod-status-filter:hover,
+  .mod-status-filter[aria-pressed="true"] {
+    @apply border-[#7890a7] bg-[#293542] text-[#eef3f8];
+  }
+
+  .mod-status-filter.invalid:hover,
+  .mod-status-filter.invalid[aria-pressed="true"] {
+    @apply border-[#d17a86] bg-[#5a2e38] text-white;
+  }
+
+  .mod-status-filter.removed:hover,
+  .mod-status-filter.removed[aria-pressed="true"] {
+    @apply border-[#d1a25d] bg-[#513d22] text-white;
+  }
+
+  .mod-status-filter.new:hover,
+  .mod-status-filter.new[aria-pressed="true"] {
+    @apply border-[#68ae89] bg-[#27523e] text-white;
+  }
+
+  .mod-status-filter:focus-visible {
+    @apply outline-2 outline-offset-2 outline-[#83b9e8];
+  }
+
+  .mod-status-visible {
+    @apply whitespace-nowrap text-[11px] text-[#778697];
   }
 
   .library-toolbar {
@@ -429,7 +534,7 @@
   }
 
   .mod-row {
-    @apply grid h-[88px] min-h-[88px] grid-cols-[minmax(0,1fr)_42px] items-center border border-transparent bg-[#151a21] select-none;
+    @apply grid h-[88px] min-h-[88px] grid-cols-[minmax(0,1fr)] items-center border border-transparent bg-[#151a21] select-none;
   }
 
   .mod-row > .icon-button {
@@ -456,8 +561,20 @@
     @apply border-[#d7a84f] bg-[#1b2026];
   }
 
+  .mod-row.dragging {
+    @apply opacity-45;
+  }
+
+  .mod-row.drop-before {
+    box-shadow: inset 0 3px 0 #73a8d8;
+  }
+
+  .mod-row.drop-after {
+    box-shadow: inset 0 -3px 0 #73a8d8;
+  }
+
   .mod-row-main {
-    @apply col-start-1 row-start-1 grid h-full min-w-0 grid-cols-[40px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_24px] items-center gap-x-2 border-0 bg-transparent px-2.5 py-1.5 text-left text-inherit;
+    @apply col-start-1 row-start-1 grid h-full w-full min-w-0 grid-cols-[40px_minmax(0,1fr)_auto] grid-rows-[minmax(0,1fr)_24px] items-center gap-x-2 border-0 bg-transparent px-2.5 py-1.5 text-left text-inherit;
   }
 
   .thumb {
@@ -492,8 +609,21 @@
     @apply col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap;
   }
 
-  .mod-row-status .active-pill {
-    @apply min-h-5 shrink-0 py-0 leading-[14px];
+  .mod-row-order {
+    @apply col-start-3 row-span-2 row-start-1 flex items-center justify-self-end;
+  }
+
+  .drag-handle {
+    @apply grid h-8 w-6 cursor-grab place-items-center text-[#6f8193] transition-colors hover:text-[#b8c8d8] active:cursor-grabbing;
+  }
+
+  .drag-handle.disabled {
+    @apply cursor-not-allowed opacity-35;
+  }
+
+  .load-order-number {
+    @apply col-start-3 row-span-2 row-start-1 min-w-[2ch] self-center justify-self-end text-right text-sm font-semibold text-[#9eabb9];
+    font-variant-numeric: tabular-nums;
   }
 
   .dependency-warning-pill {
@@ -667,6 +797,7 @@
   }
 
   .search-scope-box .select,
+  .tag-filter-box .select,
   .sort-box .select {
     display: block;
     height: 100%;

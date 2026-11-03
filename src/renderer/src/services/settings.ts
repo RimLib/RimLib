@@ -1,5 +1,5 @@
 import type { FirebaseSyncSettings, ModStoreApi } from "../../../shared/types";
-import { normalizeFirebaseSyncSettings } from "./firebaseSync";
+import { normalizeFirebaseSyncSettings } from "./firebaseSettings";
 
 export async function persistSettings(
   store: Pick<ModStoreApi, "validateWorkshopModsPath" | "load" | "save">,

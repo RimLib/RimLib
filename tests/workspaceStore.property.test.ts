@@ -5,10 +5,14 @@ import fc from "fast-check";
 
 import { createWorkspaceStore } from "../src/renderer/src/stores/workspaceStore";
 import {
+  type ModFilter,
+  modFilters,
   type ModPanelMode,
   modPanelModes,
   type ModSort,
   modSorts,
+  type ModTagFilter,
+  modTagFilters,
   type SearchScope,
   searchScopes,
 } from "../src/renderer/src/utils/uiConstants";
@@ -20,6 +24,8 @@ const viewActions = Object.freeze({
   search: "search",
   sort: "sort",
   scope: "scope",
+  filter: "filter",
+  tagFilter: "tag-filter",
 } as const);
 const viewActionArbitrary = fc.oneof(
   fc.record({ type: fc.constant(viewActions.search), panel: panelArbitrary, value: textArbitrary }),
@@ -33,6 +39,16 @@ const viewActionArbitrary = fc.oneof(
     panel: panelArbitrary,
     value: fc.constantFrom(...Object.values(searchScopes)),
   }),
+  fc.record({
+    type: fc.constant(viewActions.filter),
+    panel: panelArbitrary,
+    value: fc.constantFrom(...Object.values(modFilters)),
+  }),
+  fc.record({
+    type: fc.constant(viewActions.tagFilter),
+    panel: panelArbitrary,
+    value: fc.oneof(fc.constantFrom(...Object.values(modTagFilters)), fc.uuid()),
+  }),
 );
 
 void test("property: workspace view action sequences match an independent per-panel model", () => {
@@ -44,17 +60,27 @@ void test("property: workspace view action sequences match an independent per-pa
       const { actions } = store.getState();
       const model: Record<
         ModPanelMode,
-        { search: string; searchScope: SearchScope; sort: ModSort }
+        {
+          search: string;
+          searchScope: SearchScope;
+          sort: ModSort;
+          filter: ModFilter;
+          tagFilter: ModTagFilter;
+        }
       > = {
         unsubscribed: {
           search: "",
           searchScope: searchScopes.all,
           sort: modSorts.newest,
+          filter: modFilters.all,
+          tagFilter: modTagFilters.all,
         },
         subscribed: {
           search: "",
           searchScope: searchScopes.all,
-          sort: modSorts.active,
+          sort: modSorts.loadOrder,
+          filter: modFilters.all,
+          tagFilter: modTagFilters.all,
         },
       };
       for (const operation of operations) {
@@ -70,6 +96,14 @@ void test("property: workspace view action sequences match an independent per-pa
           case viewActions.scope:
             model[operation.panel].searchScope = operation.value;
             actions.setSearchScope(operation.panel, operation.value);
+            break;
+          case viewActions.filter:
+            model[operation.panel].filter = operation.value;
+            actions.setFilter(operation.panel, operation.value);
+            break;
+          case viewActions.tagFilter:
+            model[operation.panel].tagFilter = operation.value;
+            actions.setTagFilter(operation.panel, operation.value);
             break;
         }
         assert.deepEqual(store.getState().views, model);

@@ -1,4 +1,4 @@
-import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { ListPlus, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 import type { ModTag } from "../../../../shared/types";
@@ -7,19 +7,27 @@ import { EmptyState } from "../common/EmptyState";
 import { TagChip } from "../common/TagChip";
 import { TooltipIconButton } from "../common/TooltipIconButton";
 
-export function ManageTagsModal({
-  tags,
-  onCreate,
-  onEdit,
-  onDelete,
-  onClose,
-}: {
+export interface ManageTagsModalProps {
   tags: ModTag[];
+  inactiveCountByTagId: ReadonlyMap<string, number>;
+  addToActiveDisabledReason?: string;
+  onAddTagToActive: (tagId: string) => void;
   onCreate: () => void;
   onEdit: (tag: ModTag) => void;
   onDelete: (tag: ModTag) => void;
   onClose: () => void;
-}) {
+}
+
+export function ManageTagsModal({
+  tags,
+  inactiveCountByTagId,
+  addToActiveDisabledReason,
+  onAddTagToActive,
+  onCreate,
+  onEdit,
+  onDelete,
+  onClose,
+}: ManageTagsModalProps) {
   const [search, setSearch] = useState("");
   const filtered = tags.filter((tag) =>
     tag.name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -62,32 +70,57 @@ export function ManageTagsModal({
           />
         </div>
         <div className="tag-manager-list" role="list">
-          {filtered.map((tag) => (
-            <div className="tag-manager-row" role="listitem" key={tag.id}>
-              <TagChip tag={tag} />
-              <TooltipIconButton
-                label="Edit tag"
-                aria-label={`Edit ${tag.name}`}
-                placement={tooltipPlacements.left}
-                onClick={() => {
-                  onEdit(tag);
-                }}
-              >
-                <Pencil size={15} aria-hidden />
-              </TooltipIconButton>
-              <TooltipIconButton
-                label="Delete tag"
-                aria-label={`Delete ${tag.name}`}
-                placement={tooltipPlacements.left}
-                className="icon-button danger"
-                onClick={() => {
-                  onDelete(tag);
-                }}
-              >
-                <Trash2 size={15} aria-hidden />
-              </TooltipIconButton>
-            </div>
-          ))}
+          {filtered.map((tag) => {
+            const inactiveCount = inactiveCountByTagId.get(tag.id) ?? 0;
+            const actionLabel = `Add ${inactiveCount} ${inactiveCount === 1 ? "mod" : "mods"} tagged ${tag.name} to Active`;
+            const disabledReason =
+              addToActiveDisabledReason ??
+              (inactiveCount === 0 ? `No inactive mods tagged ${tag.name}` : undefined);
+            return (
+              <div className="tag-manager-row" role="listitem" key={tag.id}>
+                <TagChip tag={tag} />
+                <TooltipIconButton
+                  label={disabledReason ?? actionLabel}
+                  aria-label={disabledReason ? `${actionLabel}. ${disabledReason}` : actionLabel}
+                  placement={tooltipPlacements.left}
+                  className="ghost-action tag-add-active-action"
+                  disabled={Boolean(disabledReason)}
+                  onClick={() => {
+                    if (!disabledReason) {
+                      onAddTagToActive(tag.id);
+                    }
+                  }}
+                >
+                  <ListPlus size={15} aria-hidden />
+                  <span>Add to Active</span>
+                  <span className="tag-add-active-count" aria-hidden="true">
+                    {inactiveCount}
+                  </span>
+                </TooltipIconButton>
+                <TooltipIconButton
+                  label="Edit tag"
+                  aria-label={`Edit ${tag.name}`}
+                  placement={tooltipPlacements.left}
+                  onClick={() => {
+                    onEdit(tag);
+                  }}
+                >
+                  <Pencil size={15} aria-hidden />
+                </TooltipIconButton>
+                <TooltipIconButton
+                  label="Delete tag"
+                  aria-label={`Delete ${tag.name}`}
+                  placement={tooltipPlacements.left}
+                  className="icon-button danger"
+                  onClick={() => {
+                    onDelete(tag);
+                  }}
+                >
+                  <Trash2 size={15} aria-hidden />
+                </TooltipIconButton>
+              </div>
+            );
+          })}
           {!filtered.length && (
             <EmptyState label={tags.length ? "No matching tags" : "No tags yet"} />
           )}

@@ -7,7 +7,12 @@ import { test } from "node:test";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { openDatabaseFolder, openWorkshopInBrowser, revealModFolder } from "../src/main/modActions";
+import {
+  launchRimWorld,
+  openDatabaseFolder,
+  openWorkshopInBrowser,
+  revealModFolder,
+} from "../src/main/modActions";
 import { SettingsModal } from "../src/renderer/src/components/modals/SettingsModal";
 import { ModInfoPanel } from "../src/renderer/src/components/panels/ModInfoPanel";
 import { performUiAction } from "../src/renderer/src/services/uiActions";
@@ -179,6 +184,26 @@ void test("Workshop browsing sends a canonical HTTPS link to the OS, not a Steam
   );
 });
 
+void test("RimWorld launch delegates the fixed game ID to Steam and propagates shell failures", async () => {
+  const opened: string[] = [];
+  await launchRimWorld({
+    openExternal: async (url) => {
+      opened.push(url);
+    },
+  });
+  assert.deepEqual(opened, ["steam://rungameid/294100"]);
+
+  await assert.rejects(
+    launchRimWorld({
+      openExternal: async () => {
+        throw new Error("Steam protocol unavailable");
+      },
+    }),
+    /Steam protocol unavailable/,
+  );
+  assert.deepEqual(opened, ["steam://rungameid/294100"]);
+});
+
 void test("Workshop identity prefers saved IDs and safely normalizes HTTP URLs", () => {
   assert.equal(getModWorkshopId({ workshopId: "123", url: "steam://something" }), "123");
   assert.equal(
@@ -300,7 +325,7 @@ void test("unsaved active Core and unsaved Workshop mods resolve to installed fo
       ...noDiscovery,
       activeMods: async () => ({
         packageIds: ["ludeon.rimworld"],
-        installedMods: [{ packageId: "ludeon.rimworld", localPath: core }],
+        installedMods: [{ packageId: "ludeon.rimworld", localPath: core, officialContent: true }],
       }),
     });
     await revealModFolder("steam-123", current, shell, noDiscovery);

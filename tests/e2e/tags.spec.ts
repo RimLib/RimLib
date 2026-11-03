@@ -2,10 +2,64 @@ import { requireValue } from "../../src/shared/validation";
 import { sampleMods, sampleTags } from "./data";
 import { expect, test } from "./fixtures";
 
+test("filters Library and Active independently by a personal tag or Untagged", async ({
+  desktop,
+}) => {
+  const libraryFilter = desktop.library.getByRole("combobox", {
+    name: "Filter library mods by tag",
+  });
+  const activeFilter = desktop.active.getByRole("combobox", {
+    name: "Filter active mods by tag",
+  });
+  const libraryNames = desktop.library.locator(".mod-row-copy strong");
+  const activeNames = desktop.active.locator(".mod-row-copy strong");
+
+  for (const filter of [libraryFilter, activeFilter]) {
+    await expect(filter.getByRole("option")).toHaveText([
+      "All tags",
+      sampleTags.qol.name,
+      sampleTags.combat.name,
+      "Untagged",
+    ]);
+    await expect(filter.locator("option:checked")).toHaveText("All tags");
+  }
+
+  await libraryFilter.selectOption({ label: sampleTags.combat.name });
+  await expect(libraryNames).toHaveText([
+    sampleMods.weapons.name,
+    sampleMods.tribal.name,
+    sampleMods.other.name,
+  ]);
+  await expect(desktop.active.getByRole("listitem")).toHaveCount(4);
+
+  const librarySearch = desktop.library.getByRole("textbox", { name: "Search library mods" });
+  await librarySearch.fill("Tribal");
+  await expect(libraryNames).toHaveText([sampleMods.tribal.name]);
+  await librarySearch.fill("Voice");
+  await expect(desktop.library.getByRole("listitem")).toHaveCount(0);
+  await expect(desktop.library.getByText("No matching mods", { exact: true })).toBeVisible();
+  await librarySearch.fill("");
+
+  await libraryFilter.selectOption({ label: "Untagged" });
+  await expect(libraryNames).toHaveText([sampleMods.colonists.name, sampleMods.spare.name]);
+  await libraryFilter.selectOption({ label: "All tags" });
+  await expect(desktop.library.getByRole("listitem")).toHaveCount(5);
+
+  await activeFilter.selectOption({ label: sampleTags.qol.name });
+  await expect(activeNames).toHaveText([sampleMods.harmony.name, sampleMods.camera.name]);
+  await expect(desktop.library.getByRole("listitem")).toHaveCount(5);
+  await activeFilter.selectOption({ label: "Untagged" });
+  await expect(activeNames).toHaveText(["Core"]);
+  await activeFilter.selectOption({ label: "All tags" });
+  await expect(desktop.active.getByRole("listitem")).toHaveCount(4);
+});
+
 test("creates, renames and deletes a tag without losing mods or assignments", async ({
   desktop,
 }) => {
-  await desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main").click();
+  const camera = desktop.row(desktop.active, sampleMods.camera.name);
+  await expect(camera).toBeVisible();
+  await camera.locator(".mod-row-main").click();
   await desktop.info.getByRole("textbox", { name: "Search mod tags" }).fill("Star Wars");
   await desktop.info.getByRole("button", { name: "Create tag Star Wars" }).click();
   const editor = desktop.page.getByRole("dialog", { name: "New tag" });
@@ -64,12 +118,13 @@ test("rejects empty and case-insensitive duplicate tag names", async ({ desktop 
 test("bulk tag dialogs preserve selection through create/cancel and remove from all selected mods", async ({
   desktop,
 }) => {
-  await desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main").click();
+  await expect(desktop.row(desktop.active, sampleMods.camera.name)).toBeVisible();
+  await desktop.row(desktop.inactive, sampleMods.weapons.name).locator(".mod-row-main").click();
   await desktop
-    .row(desktop.library, sampleMods.weapons.name)
+    .row(desktop.inactive, sampleMods.colonists.name)
     .locator(".mod-row-main")
     .click({ modifiers: ["Shift"] });
-  await desktop.row(desktop.library, sampleMods.camera.name).click({ button: "right" });
+  await desktop.row(desktop.inactive, sampleMods.weapons.name).click({ button: "right" });
   await desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }).click();
   const bulk = desktop.page.getByRole("dialog", { name: "Add tags", exact: true });
   await bulk.getByRole("checkbox", { name: /Combat/ }).check();
@@ -90,17 +145,17 @@ test("bulk tag dialogs preserve selection through create/cancel and remove from 
   await expect(bulk.getByRole("checkbox", { name: /Combat/ })).toBeChecked();
   await expect(bulk.getByRole("checkbox", { name: /New universe/ })).toBeChecked();
   await bulk.getByRole("button", { name: "Add tags", exact: true }).click();
-  for (const id of [sampleMods.camera.id, sampleMods.weapons.id]) {
+  for (const id of [sampleMods.weapons.id, sampleMods.colonists.id]) {
     await expect
       .poll(async () => (await desktop.mod(id)).userTagIds)
       .toContain(sampleTags.combat.id);
   }
-  await desktop.row(desktop.library, sampleMods.weapons.name).click({ button: "right" });
+  await desktop.row(desktop.inactive, sampleMods.weapons.name).click({ button: "right" });
   await desktop.page.getByRole("menuitem", { name: "Remove tags", exact: true }).click();
   const remove = desktop.page.getByRole("dialog", { name: "Remove tags", exact: true });
   await remove.getByRole("checkbox", { name: /Combat/ }).check();
   await remove.getByRole("button", { name: "Remove tags", exact: true }).click();
-  for (const id of [sampleMods.camera.id, sampleMods.weapons.id]) {
+  for (const id of [sampleMods.weapons.id, sampleMods.colonists.id]) {
     await expect
       .poll(async () => (await desktop.mod(id)).userTagIds)
       .not.toContain(sampleTags.combat.id);

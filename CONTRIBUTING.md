@@ -35,12 +35,12 @@ Git hooks are local guardrails and can be bypassed. The GitHub `Quality` workflo
 ## Change Policy
 
 - Keep domain operations pure, platform adapters narrow, and component props explicit. Follow [ARCHITECTURE.md](ARCHITECTURE.md) for ownership.
-- Add focused regression tests for bug fixes, and broader tests for persistence, subscription safety or IPC changes. Do not depend on formatting-sensitive source strings when a behavioral test or AST check is available.
-- Never run tests against a real user database, Workshop folder or Steam account. Use temporary directories, injected clients and request doubles. Native manual tests require explicit authorization and a backup.
+- Add focused regression tests for bug fixes, and broader tests for persistence, subscription safety, active configuration writes, ordering or IPC changes. Do not depend on formatting-sensitive source strings when a behavioral test or AST check is available.
+- Never run tests against a real user database, Workshop folder, Steam account or `ModsConfig.xml`. Use temporary directories, injected clients, synthetic configuration files and request doubles. Native manual tests require explicit authorization and backups of both the vault and game configuration.
 - Preserve unknown database fields and historical snapshots. Changes to a schema require fixtures, migration tests, a checkpoint and a forward-version refusal test. Synchronization must not delete records.
-- Treat disconnected disks, unavailable Steam, partial results and failed saves as normal failure states. Preserve displayed data and report errors without disabling unrelated UI.
+- Treat disconnected disks, unavailable Steam, an unreadable or concurrently changed game configuration, dependency cycles, partial results and failed saves as normal failure states. Preserve displayed data/current order and report errors without disabling unrelated UI.
 - Do not put logs, database exports, credentials or installed mod content in commits. Review logs before sharing them.
 
 ## Before Release
 
-The quality gate is not a security audit or a complete native UI test. Before public distribution, review Electron/Chromium and parser advisories, verify native Steam SDK packaging, test upgrades and shutdown with disposable databases, and exercise keyboard interaction and disk/Steam failure paths in Electron on each supported OS. Dependency advisory queries need network access; do not interpret an unavailable audit as a clean audit.
+The quality gate is not a security audit or a complete native UI test. Before public distribution, review Electron/Chromium and parser advisories, verify native Steam SDK packaging, test upgrades and shutdown with disposable databases, and exercise keyboard interaction, active-list backup/recovery and disk/Steam/game-running failure paths in Electron on each supported OS. Dependency advisory queries need network access; do not interpret an unavailable audit as a clean audit.

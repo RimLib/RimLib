@@ -3,6 +3,8 @@ import { type ConstantValue, hasConstantValue } from "../../../shared/domainCons
 export const modPanelModes = Object.freeze({
   unsubscribed: "unsubscribed",
   subscribed: "subscribed",
+  inactive: "unsubscribed",
+  active: "subscribed",
 } as const);
 export type ModPanelMode = ConstantValue<typeof modPanelModes>;
 
@@ -10,11 +12,28 @@ export const modSorts = Object.freeze({
   newest: "newest",
   oldest: "oldest",
   active: "active",
+  loadOrder: "load-order",
+  invalid: "invalid-first",
+  notSubscribed: "not-subscribed-first",
 } as const);
 export type ModSort = ConstantValue<typeof modSorts>;
 export function isModSort(value: unknown): value is ModSort {
   return hasConstantValue(modSorts, value);
 }
+
+export const modFilters = Object.freeze({
+  all: "all",
+  invalid: "invalid",
+  pendingActivation: "pending-activation",
+  pendingDeactivation: "pending-deactivation",
+} as const);
+export type ModFilter = ConstantValue<typeof modFilters>;
+
+export const modTagFilters = Object.freeze({
+  all: "",
+  untagged: null,
+} as const);
+export type ModTagFilter = string | null;
 
 export const searchScopes = Object.freeze({
   all: "all",
@@ -32,10 +51,7 @@ export const uiTimings = Object.freeze({
   saveDebounceMs: 250,
   errorNotificationMs: 12_000,
   steamStatusTimeoutMs: 7_000,
-  steamStatusPollMs: 10_000,
-  activePollMs: 10_000,
-  workshopStatusPollMs: 30_000,
-  workshopStatusCooldownMs: 5_000,
+  loadingIndicatorDelayMs: 200,
 });
 
 export const keyboardKeys = Object.freeze({

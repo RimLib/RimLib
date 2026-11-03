@@ -256,24 +256,24 @@ void test("bulk tag edits survive the ordinary save/reopen flow without requirin
   }
 });
 
-void test("Steam availability disables only subscription menu actions; local and unsaved items remain protected", () => {
+void test("external availability does not gate drafts while local and unsaved items remain protected", () => {
   const mods = makeVault().mods;
   const saved = new Set(mods.map((mod) => mod.id));
-  const offline = modBatchAvailability(mods, saved, false, true, "Start Steam first");
-  assert.equal(offline.tagsDisabledReason, undefined);
-  assert.equal(offline.subscriptionDisabledReason, "Start Steam first");
-  assert.equal(
-    modBatchAvailability(mods, saved, false, false).subscriptionDisabledReason,
-    undefined,
-  );
+  const available = modBatchAvailability(mods, saved, false);
+  assert.equal(available.tagsDisabledReason, undefined);
+  assert.equal(available.subscriptionDisabledReason, undefined);
   const local = { ...requireValue(mods[0]), workshopId: undefined, source: "local" as const };
-  const availability = modBatchAvailability([local], saved, false, false);
+  const availability = modBatchAvailability([local], saved, false);
   assert.equal(availability.tagsDisabledReason, undefined);
   assert.match(requireValue(availability.subscriptionDisabledReason), /Local mods/);
-  const unsaved = modBatchAvailability(mods, new Set(), false, false);
+  const unsaved = modBatchAvailability(mods, new Set(), false);
   assert.match(requireValue(unsaved.tagsDisabledReason), /save these mods/);
   assert.equal(unsaved.subscriptionDisabledReason, unsaved.tagsDisabledReason);
-  assert.ok(modBatchAvailability(mods, saved, true, false).tagsDisabledReason);
+  assert.ok(modBatchAvailability(mods, saved, true).tagsDisabledReason);
+
+  const subscribed = { ...requireValue(mods[0]), subscribed: true };
+  const removal = modBatchAvailability([subscribed], saved, false);
+  assert.equal(removal.removalDisabledReason, undefined);
 });
 
 function findElement(
@@ -460,22 +460,48 @@ void test("row context events suppress the browser menu and retain the clicked m
   assert.equal(prevented, 2);
 });
 
-void test("list rows place Active first and tags on the same chip line, without redundant installed or subscription labels", () => {
-  const html = renderToStaticMarkup(
+void test("selected rows expose every tag while compact rows retain an accessible overflow summary", () => {
+  const selectedHtml = renderToStaticMarkup(
     <ModRow
       mod={mod("1", ["qol", "tribal", "starwars"])}
       tags={tags}
       selected
       active
+      loadOrder={3}
       subscriptionAction="unsubscribe"
       onSelect={noop}
       onToggle={noop}
     />,
   );
-  assert.ok(html.indexOf('class="active-pill"') < html.indexOf('class="user-tag"'));
-  assert.match(html, /class="mod-row-status"[^>]*>.*Active.*Quality of life.*Tribal.*\+1/s);
-  assert.doesNotMatch(html, /row-tags|>Installed<|>Not installed<|>Subscribed<|>Not subscribed</);
-  assert.match(html, /aria-pressed="true"/);
+  assert.match(
+    selectedHtml,
+    /class="mod-row-status" title="Quality of life, Tribal, Star Wars"[^>]*>.*Quality of life.*Tribal.*Star Wars/s,
+  );
+  assert.equal((selectedHtml.match(/class="user-tag"/g) ?? []).length, 3);
+  assert.match(selectedHtml, /class="user-tag" title="Quality of life, Tribal, Star Wars"/);
+  assert.doesNotMatch(selectedHtml, /class="extra-tags"/);
+  assert.match(selectedHtml, /class="load-order-number" aria-label="Load order 3">3<\/span>/);
+  assert.doesNotMatch(
+    selectedHtml,
+    /active-pill|lucide-play|row-tags|>Installed<|>Not installed<|>Subscribed<|>Not subscribed/,
+  );
+  assert.match(selectedHtml, /aria-pressed="true"/);
+
+  const compactHtml = renderToStaticMarkup(
+    <ModRow
+      mod={mod("1", ["qol", "tribal", "starwars"])}
+      tags={tags}
+      selected={false}
+      subscriptionAction="unsubscribe"
+      onSelect={noop}
+      onToggle={noop}
+    />,
+  );
+  assert.equal((compactHtml.match(/class="user-tag"/g) ?? []).length, 2);
+  assert.match(
+    compactHtml,
+    /class="extra-tags" title="Quality of life, Tribal, Star Wars" aria-label="1 more tag: Star Wars">\+1<\/span>/,
+  );
 });
 
 void test("multi-selected rows are highlighted independently of the last focused Mod Info row", () => {
@@ -504,26 +530,30 @@ void test("multi-selected rows are highlighted independently of the last focused
   assert.match(html, /2 selected/);
 });
 
-void test("context menu exposes tag, subscription and selection-aware library removal actions", () => {
+void test("inactive context menus expose subscription and selection-aware library actions", () => {
   const calls: string[] = [];
   const props = {
     count: 3,
     subscribed: false,
+    showSubscription: true,
     onAddTags: () => calls.push("add"),
     onRemoveTags: () => calls.push("remove"),
+    onAddToActive: () => calls.push("add-active"),
     onSubscription: () => calls.push("subscribe"),
     onRemoveFromLibrary: () => calls.push("remove-library"),
   };
   const html = renderToStaticMarkup(<ModContextMenuContent {...props} />);
   assert.match(html, /role="menu"/);
-  assert.equal((html.match(/role="menuitem"/g) ?? []).length, 4);
+  assert.equal((html.match(/role="menuitem"/g) ?? []).length, 5);
   assert.match(html, /3 mods selected/);
   assert.match(html, /Add tags/);
   assert.match(html, /Remove tags/);
+  assert.match(html, />Add to Active<\/button>/);
+  assert.doesNotMatch(html, />Remove from Active<\/button>/);
   assert.match(html, />Subscribe<\/button>/);
   assert.doesNotMatch(html, />Unsubscribe<\/button>/);
   const tree = ModContextMenuContent(props);
-  for (const label of ["Add tags", "Remove tags", "Subscribe", "Remove from library"]) {
+  for (const label of ["Add tags", "Remove tags", "Add to Active", "Subscribe", "Remove"]) {
     const button = findElement(
       tree,
       (node) =>
@@ -533,11 +563,57 @@ void test("context menu exposes tag, subscription and selection-aware library re
     assert.ok(button);
     (button.props.onClick as () => void)();
   }
-  assert.deepEqual(calls, ["add", "remove", "subscribe", "remove-library"]);
+  assert.deepEqual(calls, ["add", "remove", "add-active", "subscribe", "remove-library"]);
   assert.match(
     renderToStaticMarkup(<ModContextMenuContent {...props} subscribed />),
     />Unsubscribe<\/button>/,
   );
+  const subscribedTree = ModContextMenuContent({
+    ...props,
+    subscribed: true,
+    removalRequiresUnsubscribe: true,
+  });
+  const subscribedRemoval = findElement(
+    subscribedTree,
+    (node) =>
+      node.props.role === "menuitem" &&
+      Children.toArray(node.props.children as ReactNode).includes("Remove"),
+  );
+  assert.ok(subscribedRemoval);
+  assert.equal(subscribedRemoval.props.disabled, false);
+  assert.equal(
+    subscribedRemoval.props["aria-description"],
+    "Unsubscribe and remove 3 mods from library",
+  );
+  assert.match(
+    renderToStaticMarkup(
+      <ModContextMenuContent {...props} subscribed removalRequiresUnsubscribe />,
+    ),
+    /title="Unsubscribe and remove 3 mods from library"/,
+  );
+  const activeProps = {
+    ...props,
+    subscribed: true,
+    showSubscription: false,
+    onAddToActive: undefined,
+    onRemoveFromActive: () => calls.push("remove-active"),
+    removalDisabledReason: "Active mods cannot be removed from the library",
+  };
+  const activeHtml = renderToStaticMarkup(<ModContextMenuContent {...activeProps} />);
+  assert.doesNotMatch(activeHtml, />Subscribe<\/button>|>Unsubscribe<\/button>/);
+  assert.doesNotMatch(activeHtml, />Add to Active<\/button>/);
+  assert.match(activeHtml, />Remove from Active<\/button>/);
+  assert.match(activeHtml, /Add tags|Remove tags/);
+  const activeTree = ModContextMenuContent(activeProps);
+  const removeFromActive = findElement(
+    activeTree,
+    (node) =>
+      node.props.role === "menuitem" &&
+      Children.toArray(node.props.children as ReactNode).includes("Remove from Active"),
+  );
+  assert.ok(removeFromActive);
+  (removeFromActive.props.onClick as () => void)();
+  assert.equal(calls.at(-1), "remove-active");
 });
 
 void test("disabled menu commands never invoke actions even if their callbacks are called programmatically", () => {
@@ -546,13 +622,15 @@ void test("disabled menu commands never invoke actions even if their callbacks a
     count: 2,
     subscribed: true,
     tagsDisabledReason: "Not saved",
-    subscriptionDisabledReason: "Steam is closed",
+    activityDisabledReason: "Active configuration unavailable",
+    subscriptionDisabledReason: "An operation is in progress",
     onAddTags: () => actions++,
     onRemoveTags: () => actions++,
+    onAddToActive: () => actions++,
     onSubscription: () => actions++,
     onRemoveFromLibrary: () => actions++,
   });
-  for (const label of ["Add tags", "Remove tags", "Unsubscribe", "Remove from library"]) {
+  for (const label of ["Add tags", "Remove tags", "Add to Active", "Unsubscribe", "Remove"]) {
     const button = findElement(
       tree,
       (node) =>
@@ -566,60 +644,99 @@ void test("disabled menu commands never invoke actions even if their callbacks a
   assert.equal(actions, 0);
 });
 
-void test("Active rows and a selected group containing Active mods disable unsubscribe while tags remain editable", () => {
+void test("active rows stage deactivation by double-click while Core stays locked", () => {
   const renderRow = (ModRow as unknown as { type: (props: object) => ReactNode }).type;
-  let actions = 0;
+  const activity: string[] = [];
   const tree = renderRow({
-    mod: { ...mod("1"), subscribed: true },
+    mod: { ...mod("1"), packageId: "author.mod1", subscribed: true },
     active: true,
     tags,
     selected: true,
     subscriptionAction: "unsubscribe",
     onSelect: noop,
-    onToggle: () => actions++,
+    onToggle: noop,
+    onToggleActive: (id: string) => activity.push(id),
   });
-  const button = findElement(tree, (node) => node.type === TooltipIconButton);
+  const button = findElement(tree, (node) => node.props.className === "mod-row-main");
   assert.ok(button);
-  assert.equal(button.props.disabled, true);
-  assert.equal(button.props.label, "Active mods cannot be unsubscribed");
-  (button.props.onClick as () => void)();
-  assert.equal(actions, 0);
+  assert.equal(button.props.title, "Double-click to stage deactivation");
+  (button.props.onDoubleClick as () => void)();
+  assert.deepEqual(activity, ["steam-1"]);
+  assert.equal(
+    findElement(tree, (node) => node.type === TooltipIconButton),
+    undefined,
+  );
+
+  const inactiveTree = renderRow({
+    mod: { ...mod("2"), packageId: "author.mod2" },
+    active: false,
+    tags,
+    selected: false,
+    subscriptionAction: "subscribe",
+    onSelect: noop,
+    onToggle: noop,
+    onToggleActive: (id: string) => activity.push(id),
+  });
+  const inactiveButton = findElement(
+    inactiveTree,
+    (node) => node.props.className === "mod-row-main",
+  );
+  assert.ok(inactiveButton);
+  assert.equal(inactiveButton.props.title, "Double-click to stage activation");
+  (inactiveButton.props.onDoubleClick as () => void)();
+  assert.deepEqual(activity, ["steam-1", "steam-2"]);
+
+  const coreTree = renderRow({
+    mod: {
+      ...mod("core"),
+      id: "active-package:ludeon.rimworld",
+      packageId: "ludeon.rimworld",
+      workshopId: undefined,
+      subscribed: false,
+    },
+    active: true,
+    tags,
+    selected: false,
+    subscriptionAction: "unsubscribe",
+    onSelect: noop,
+    onToggle: noop,
+    onToggleActive: (id: string) => activity.push(id),
+  });
+  const coreButton = findElement(coreTree, (node) => node.props.className === "mod-row-main");
+  assert.ok(coreButton);
+  assert.equal(coreButton.props.title, "RimWorld Core must remain active");
+  (coreButton.props.onDoubleClick as () => void)();
+  assert.deepEqual(activity, ["steam-1", "steam-2"]);
+
   const mods = [mod("1"), mod("2")].map((mod) => ({ ...mod, subscribed: true }));
   const availability = modBatchAvailability(
     mods,
     new Set(mods.map((mod) => mod.id)),
     false,
-    false,
-    undefined,
     new Set(["steam-1"]),
   );
   assert.equal(availability.tagsDisabledReason, undefined);
   assert.equal(availability.subscriptionDisabledReason, "Active mods cannot be unsubscribed");
-  assert.match(requireValue(availability.removalDisabledReason), /Unsubscribe these mods/);
+  assert.match(requireValue(availability.removalDisabledReason), /Active mods/);
   const menu = ModContextMenuContent({
     count: 2,
     subscribed: true,
+    showSubscription: false,
     ...availability,
     onAddTags: noop,
     onRemoveTags: noop,
-    onSubscription: () => actions++,
-    onRemoveFromLibrary: () => actions++,
+    onSubscription: () => activity.push("subscription"),
+    onRemoveFromLibrary: () => activity.push("remove"),
   });
-  for (const label of ["Unsubscribe", "Remove from library"]) {
-    const action = findElement(
-      menu,
-      (node) =>
-        node.props.role === "menuitem" &&
-        Children.toArray(node.props.children as ReactNode).includes(label),
-    );
-    assert.ok(action);
-    assert.equal(action.props.disabled, true);
-    (action.props.onClick as () => void)();
-  }
-  assert.equal(actions, 0);
+  assert.equal(
+    findElement(menu, (node) =>
+      Children.toArray(node.props.children as ReactNode).includes("Unsubscribe"),
+    ),
+    undefined,
+  );
 });
 
-void test("unreadable or loading Active disables every right-panel row unsubscribe without blocking selection", () => {
+void test("unreadable or loading active state blocks row activity changes without blocking selection", () => {
   const props: ModsPanelProps = {
     mode: "subscribed",
     mods: [{ ...mod("1"), subscribed: true }],
@@ -627,7 +744,7 @@ void test("unreadable or loading Active disables every right-panel row unsubscri
     tags,
     search: "",
     searchScope: "all",
-    sort: "active",
+    sort: "load-order",
     activeIds: new Set(),
     activeOrder: new Map(),
     onSearch: noop,
@@ -639,31 +756,37 @@ void test("unreadable or loading Active disables every right-panel row unsubscri
   };
   for (const extra of [{ activeLoading: true }, { activeError: "Config unavailable" }]) {
     const html = renderToStaticMarkup(<ModsPanel {...props} {...extra} />);
-    assert.match(html, /<button[^>]*disabled=""[^>]*aria-label="Unsubscribe from Mod 1"/);
+    assert.match(html, /title="(?:Active mod configuration is still loading|Config unavailable)"/);
+    assert.doesNotMatch(html, /Subscribe to|Unsubscribe from/);
     assert.doesNotMatch(html, /<button[^>]*class="mod-row-main"[^>]*disabled/);
   }
-  assert.match(
-    requireValue(
-      modBatchAvailability(
-        props.mods,
-        new Set(["steam-1"]),
-        false,
-        false,
-        undefined,
-        new Set(),
-        "Unavailable",
-      ).subscriptionDisabledReason,
-    ),
-    /Unsubscribe is disabled/,
+  assert.equal(
+    modBatchAvailability(props.mods, new Set(["steam-1"]), false).subscriptionDisabledReason,
+    undefined,
   );
 });
 
-void test("Mod Info hides removal for subscribed mods and blocks invalid removal selections", () => {
+void test("Mod Info exposes compound removal for inactive subscribed mods and blocks invalid selections", () => {
   const props = { tags, onAssignTag: noop, onCreateTag: noop, onRemoveModFromLibrary: noop };
-  assert.doesNotMatch(
-    renderToStaticMarkup(<ModInfoPanel {...props} mod={{ ...mod("1"), subscribed: true }} />),
-    /Remove from library|Remove saved mod/,
+  const requested: string[] = [];
+  const subscribedTree = ModInfoPanel({
+    ...props,
+    mod: { ...mod("1"), subscribed: true },
+    removalRequiresUnsubscribe: true,
+    onRemoveModFromLibrary: (id) => requested.push(id),
+  });
+  const subscribedButton = findElement(
+    subscribedTree,
+    (node) =>
+      node.type === "button" &&
+      Children.toArray(node.props.children as ReactNode).includes("Removed"),
   );
+  assert.ok(subscribedButton);
+  assert.equal(subscribedButton.props.disabled, false);
+  assert.equal(subscribedButton.props.title, "Unsubscribe and remove from library");
+  (subscribedButton.props.onClick as () => void)();
+  assert.deepEqual(requested, ["steam-1"]);
+
   const removed: string[] = [];
   const tree = ModInfoPanel({
     ...props,
@@ -674,7 +797,9 @@ void test("Mod Info hides removal for subscribed mods and blocks invalid removal
   });
   const button = findElement(
     tree,
-    (node) => node.type === "button" && node.props.className === "danger-action",
+    (node) =>
+      node.type === "button" &&
+      Children.toArray(node.props.children as ReactNode).includes("Removed"),
   );
   assert.ok(button);
   assert.equal(button.props.disabled, true);
@@ -682,13 +807,12 @@ void test("Mod Info hides removal for subscribed mods and blocks invalid removal
   assert.deepEqual(removed, []);
 });
 
-void test("library removal stays available with Steam closed, but subscribed menu items can never invoke it", () => {
+void test("library removal stays available whether or not an unsubscribe is required", () => {
   let removed = 0;
   for (const subscribed of [false, true]) {
     const menu = ModContextMenuContent({
       count: 2,
       subscribed,
-      subscriptionDisabledReason: "Steam unavailable",
       onAddTags: noop,
       onRemoveTags: noop,
       onSubscription: noop,
@@ -698,13 +822,13 @@ void test("library removal stays available with Steam closed, but subscribed men
       menu,
       (node) =>
         node.props.role === "menuitem" &&
-        Children.toArray(node.props.children as ReactNode).includes("Remove from library"),
+        Children.toArray(node.props.children as ReactNode).includes("Remove"),
     );
     assert.ok(action);
-    assert.equal(action.props.disabled, subscribed);
+    assert.equal(action.props.disabled, false);
     (action.props.onClick as () => void)();
   }
-  assert.equal(removed, 1);
+  assert.equal(removed, 2);
 });
 
 void test("context menu positioning clamps all viewport edges and keyboard navigation wraps enabled items", () => {
@@ -763,17 +887,44 @@ void test("context menus escape panel clipping and App routes the full selection
   const assignments = await sourceCallArguments("src/renderer/src/App.tsx", "assignTags");
   assert.ok(
     assignments.some(
-      (args) => args[0] === "modIds" && args[1] === "[tagId]" && args[2] === "assigned",
+      (args) =>
+        args[0] === "modTagTargets(selection, modId)" &&
+        args[1] === "[tagId]" &&
+        args[2] === "assigned",
     ),
   );
   const calls = await sourceCallArguments("src/renderer/src/App.tsx", "stageChanges");
   assert.ok(
     calls.some(
       (args) =>
-        args[0] ===
-          "panel === modPanelModes.subscribed ? draftActions.unsubscribe : draftActions.subscribe" &&
-        args[1] === "modIds",
+        args[0] === "draftActions.subscribe" && args[1] === "subscribeTargets.map((mod) => mod.id)",
     ),
+  );
+  assert.ok(
+    calls.some(
+      (args) =>
+        args[0] === "draftActions.unsubscribe" &&
+        args[1] === "unsubscribeTargets.map((mod) => mod.id)",
+    ),
+  );
+  assert.ok(
+    calls.some((args) => args[0] === "draftActions.activate" && args[1] === "contextMenu.modIds"),
+  );
+  assert.ok(
+    calls.some((args) => args[0] === "draftActions.deactivate" && args[1] === "contextMenu.modIds"),
+  );
+  assert.match(
+    app,
+    /const unsubscribeAvailability = modBatchAvailability\([\s\S]*?panels\.activeIds,[\s\S]*?activeConfigurationError/,
+  );
+  assert.match(menu, /showSubscription=\{contextMenu\.panel === modPanelModes\.inactive\}/);
+  assert.match(
+    menu,
+    /onAddToActive=\{[\s\S]*?contextMenu\.panel === modPanelModes\.inactive[\s\S]*?props\.onAddToActive[\s\S]*?: undefined[\s\S]*?\}/,
+  );
+  assert.match(
+    menu,
+    /onRemoveFromActive=\{[\s\S]*?contextMenu\.panel === modPanelModes\.active[\s\S]*?props\.onRemoveFromActive[\s\S]*?: undefined[\s\S]*?\}/,
   );
   const removals = await sourceCallArguments("src/renderer/src/App.tsx", "requestLibraryRemoval");
   assert.ok(removals.some((args) => args[0] === "modTagTargets(selection, id)"));

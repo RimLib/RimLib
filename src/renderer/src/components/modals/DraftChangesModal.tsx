@@ -2,8 +2,11 @@ import { Check, CircleCheck, CircleX, LoaderCircle, Undo2, X } from "lucide-reac
 import { useState } from "react";
 
 import {
+  activeOrderDraftKinds,
+  type ActiveOrderDraftOperation,
   draftActions,
   type DraftChange,
+  draftOperationCount,
   type DraftProgress,
   draftStatuses,
   draftStepLabels,
@@ -17,8 +20,10 @@ export function DraftChangesModal({
   applying,
   progress,
   disabledReason,
+  activeOrderOperations = [],
   remainingCount,
   onUndo,
+  onUndoActiveOrder,
   onClose,
   onConfirm,
 }: {
@@ -26,28 +31,38 @@ export function DraftChangesModal({
   applying: boolean;
   progress?: DraftProgress;
   disabledReason?: string;
+  activeOrderOperations?: readonly ActiveOrderDraftOperation[];
   remainingCount: number;
   onUndo: (id: string) => void;
+  onUndoActiveOrder: (operationId: string) => void;
   onClose: () => void;
   onConfirm: () => void;
 }) {
   const [acknowledged, setAcknowledged] = useState(false);
   const deleting = changes.some((change) => change.action === draftActions.remove);
+  const changeCount = draftOperationCount(changes, activeOrderOperations.length);
   const finished =
     progress?.status === draftStatuses.complete || progress?.status === draftStatuses.failed;
   const steps = [
     draftSteps.validate,
-    ...(changes.some((change) => change.action === draftActions.unsubscribe)
-      ? [draftSteps.unsubscribe]
-      : []),
     ...(changes.some((change) => change.action === draftActions.subscribe)
       ? [draftSteps.subscribe]
+      : []),
+    ...(activeOrderOperations.length > 0 ||
+    changes.some(
+      (change) =>
+        change.action === draftActions.activate || change.action === draftActions.deactivate,
+    )
+      ? [draftSteps.configure]
+      : []),
+    ...(changes.some((change) => change.action === draftActions.unsubscribe)
+      ? [draftSteps.unsubscribe]
       : []),
     ...(deleting ? [draftSteps.remove] : []),
     draftSteps.finish,
   ];
   const current = progress ? steps.indexOf(progress.step) : -1;
-  const disabled = Boolean(disabledReason) || !changes.length || (deleting && !acknowledged);
+  const disabled = Boolean(disabledReason) || !changeCount || (deleting && !acknowledged);
   return (
     <div className="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="draft-title">
       <div className="modal-box app-modal draft-modal">
@@ -104,14 +119,14 @@ export function DraftChangesModal({
           </div>
         ) : (
           <p className="app-modal-copy">
-            {changes.length} pending {changes.length === 1 ? "change" : "changes"}. Steam
-            subscriptions and saved records change only after confirmation. Tags and RimWorld's
-            enabled configuration are preserved.
+            {changeCount} pending {changeCount === 1 ? "change" : "changes"}. Steam subscriptions,
+            saved records, active mods and load order change only after confirmation. Tags are
+            preserved.
           </p>
         )}
         <ul className="draft-review-list" aria-label="Draft changes">
           {changes.map(({ mod, action }) => (
-            <li key={mod.id}>
+            <li key={`${mod.id}:${action}`}>
               <div>
                 <strong>{mod.name}</strong>
                 <span>{mod.author}</span>
@@ -122,6 +137,35 @@ export function DraftChangesModal({
                   label={`Undo pending change for ${mod.name}`}
                   onClick={() => {
                     onUndo(mod.id);
+                  }}
+                >
+                  <Undo2 size={16} aria-hidden />
+                </TooltipIconButton>
+              )}
+            </li>
+          ))}
+          {activeOrderOperations.map((operation) => (
+            <li key={operation.id}>
+              <div>
+                <strong>{operation.modName}</strong>
+                <span>
+                  {operation.kind === activeOrderDraftKinds.autoSort
+                    ? "Auto-sort: move"
+                    : operation.kind === activeOrderDraftKinds.import
+                      ? "Import: move"
+                      : "Move"}{" "}
+                  from position {operation.fromPosition} to position {operation.toPosition}
+                  {operation.kind === activeOrderDraftKinds.import
+                    ? ` · ${operation.fileName}`
+                    : ""}
+                </span>
+              </div>
+              <DraftBadge action="order" />
+              {!progress && (
+                <TooltipIconButton
+                  label={`Undo pending load order change for ${operation.modName}`}
+                  onClick={() => {
+                    onUndoActiveOrder(operation.id);
                   }}
                 >
                   <Undo2 size={16} aria-hidden />
@@ -163,7 +207,7 @@ export function DraftChangesModal({
               }}
             >
               <Check size={16} aria-hidden />
-              Apply {changes.length} {changes.length === 1 ? "change" : "changes"}
+              Apply {changeCount} {changeCount === 1 ? "change" : "changes"}
             </button>
           )}
         </div>

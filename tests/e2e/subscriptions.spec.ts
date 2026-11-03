@@ -1,74 +1,187 @@
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ipcChannels } from "../../src/shared/ipc";
-import { configXml, initialActivePackages, sampleMods, sampleTags } from "./data";
+import { sampleMods, sampleTags } from "./data";
 import { expect, test } from "./fixtures";
 
-test("subscribes a saved mod without losing metadata or changing the game configuration", async ({
+test("Inactive Mod Info stages and applies a subscription without changing activity", async ({
   desktop,
 }) => {
-  const game = await readFile(desktop.config, "utf8");
+  const configBefore = await readFile(desktop.config, "utf8");
   const before = await desktop.mod(sampleMods.weapons.id);
-  await desktop.library
-    .getByRole("button", { name: `Subscribe to ${sampleMods.weapons.name}`, exact: true })
-    .click();
-  await expect(desktop.row(desktop.subscribed, sampleMods.weapons.name)).toBeVisible();
-  await expect(desktop.row(desktop.library, sampleMods.weapons.name)).toHaveCount(0);
-  await expect(desktop.row(desktop.subscribed, sampleMods.weapons.name)).toContainText(
-    "Pending subscribe",
-  );
+  const row = desktop.row(desktop.inactive, sampleMods.weapons.name);
+
+  await row.locator(".mod-row-main").click();
+  await expect(desktop.infoName).toHaveText(sampleMods.weapons.name);
+  await desktop.info.getByRole("button", { name: "Subscribe", exact: true }).click();
+
+  await expect(row).toContainText("Pending subscribe");
+  await expect(desktop.row(desktop.active, sampleMods.weapons.name)).toHaveCount(0);
   expect(await desktop.calls("subscribe")).toEqual([]);
   expect((await desktop.mod(sampleMods.weapons.id)).subscribed).toBe(false);
+
   await desktop.applyDraft();
+
   expect(await desktop.calls("subscribe")).toEqual([
     { kind: "subscribe", value: sampleMods.weapons.id },
   ]);
   expect(await desktop.mod(sampleMods.weapons.id)).toMatchObject({ ...before, subscribed: true });
-  expect(await readFile(desktop.config, "utf8")).toBe(game);
-  await desktop.reopen();
-  await expect(desktop.row(desktop.subscribed, sampleMods.weapons.name)).toBeVisible();
-});
-
-test("unsubscribing requires confirmation and moves the mod to Library with tags retained", async ({
-  desktop,
-}) => {
-  const game = await readFile(desktop.config, "utf8");
-  const before = await desktop.mod(sampleMods.other.id);
-  const button = desktop.subscribed.getByRole("button", {
-    name: `Unsubscribe from ${sampleMods.other.name}`,
-    exact: true,
-  });
-  await button.click();
-  const dialog = await desktop.reviewDraft();
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  expect(await desktop.calls("unsubscribe")).toEqual([]);
-  await expect(desktop.row(desktop.library, sampleMods.other.name)).toContainText(
-    "Pending unsubscribe",
-  );
-  expect((await desktop.mod(sampleMods.other.id)).subscribed).toBe(true);
-  await desktop.applyDraft();
-  await expect(desktop.row(desktop.library, sampleMods.other.name)).toBeVisible();
-  expect(await desktop.mod(sampleMods.other.id)).toMatchObject({ ...before, subscribed: false });
-  expect((await desktop.mod(sampleMods.other.id)).userTagIds).toContain(sampleTags.combat.id);
-  expect(await readFile(desktop.config, "utf8")).toBe(game);
-  await desktop.reopen();
-  await expect(desktop.row(desktop.library, sampleMods.other.name)).toBeVisible();
-});
-
-test("Active unsubscribe is guarded in rows, context menus and the privileged IPC handler", async ({
-  desktop,
-}) => {
-  const active = desktop.row(desktop.subscribed, sampleMods.harmony.name);
+  expect(await readFile(desktop.config, "utf8")).toBe(configBefore);
+  await expect(desktop.row(desktop.inactive, sampleMods.weapons.name)).toBeVisible();
   await expect(
-    active.getByRole("button", { name: `Unsubscribe from ${sampleMods.harmony.name}` }),
-  ).toBeDisabled();
-  await active.click({ button: "right" });
+    desktop.info.getByRole("button", { name: "Unsubscribe", exact: true }),
+  ).toBeVisible();
+
+  await desktop.reopen();
+  await expect(desktop.row(desktop.inactive, sampleMods.weapons.name)).toBeVisible();
+});
+
+test("Inactive Mod Info unsubscribe remains a draft when review is cancelled, then applies", async ({
+  desktop,
+}) => {
+  const configBefore = await readFile(desktop.config, "utf8");
+  const before = await desktop.mod(sampleMods.other.id);
+  const row = desktop.row(desktop.inactive, sampleMods.other.name);
+
+  await row.locator(".mod-row-main").click();
+  await desktop.info.getByRole("button", { name: "Unsubscribe", exact: true }).click();
+  await expect(row).toContainText("Pending unsubscribe");
+
+  const dialog = await desktop.reviewDraft();
+  await expect(dialog.getByRole("listitem")).toContainText("Pending unsubscribe");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  expect(await desktop.calls("unsubscribe")).toEqual([]);
+  expect((await desktop.mod(sampleMods.other.id)).subscribed).toBe(true);
+  expect(await readFile(desktop.config, "utf8")).toBe(configBefore);
+  await expect(row).toContainText("Pending unsubscribe");
+
+  await desktop.applyDraft();
+
+  const after = await desktop.mod(sampleMods.other.id);
+  expect(after).toMatchObject({
+    id: before.id,
+    packageId: before.packageId,
+    workshopId: before.workshopId,
+    source: before.source,
+    subscribed: false,
+  });
+  expect({ addedAt: after.addedAt, notes: after.notes, userTagIds: after.userTagIds }).toEqual({
+    addedAt: before.addedAt,
+    notes: before.notes,
+    userTagIds: before.userTagIds,
+  });
+  expect(after.userTagIds).toContain(sampleTags.combat.id);
+  expect((await desktop.vault()).mods).toHaveLength(8);
+  expect(await readFile(desktop.config, "utf8")).toBe(configBefore);
+  await expect(desktop.row(desktop.inactive, sampleMods.other.name)).toBeVisible();
+});
+
+test("inactive context-menu Subscribe and Unsubscribe apply to the selected mods only", async ({
+  desktop,
+}) => {
+  const subscribeNames = [sampleMods.weapons.name, sampleMods.tribal.name] as const;
+  const subscribeIds = [sampleMods.weapons.id, sampleMods.tribal.id].sort();
+  const unsubscribeNames = [sampleMods.spare.name, sampleMods.other.name] as const;
+  const unsubscribeIds = [sampleMods.spare.id, sampleMods.other.id].sort();
+  const selectBoth = async (names: readonly [string, string]) => {
+    await desktop.row(desktop.inactive, names[0]).locator(".mod-row-main").click();
+    await desktop
+      .row(desktop.inactive, names[1])
+      .locator(".mod-row-main")
+      .click({ modifiers: ["ControlOrMeta"] });
+  };
+
+  await selectBoth(subscribeNames);
+  await desktop.row(desktop.inactive, subscribeNames[0]).click({ button: "right" });
+  await expect(
+    desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
+  ).toBeEnabled();
   await expect(
     desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
   ).toBeDisabled();
-  await expect(desktop.page.getByRole("menuitem", { name: "Remove from library" })).toBeDisabled();
+  await desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }).click();
+  await expect(desktop.page.locator(".draft-bar")).toContainText("2 pending changes");
+  for (const name of subscribeNames) {
+    await expect(desktop.row(desktop.inactive, name)).toContainText("Pending subscribe");
+  }
+  await desktop.applyDraft();
+  expect((await desktop.calls("subscribe")).map((call) => call.value).sort()).toEqual(subscribeIds);
+
+  // Use mods with existing local folders for the destructive half of the test. A newly
+  // subscribed Workshop item has no readable About.xml until Steam finishes downloading it,
+  // so RimLib correctly refuses to guess whether it is active.
+  await selectBoth(unsubscribeNames);
+  await desktop.row(desktop.inactive, unsubscribeNames[0]).click({ button: "right" });
+  await expect(
+    desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
+  ).toBeEnabled();
+  await desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }).click();
+  await expect(desktop.page.locator(".draft-bar")).toContainText("2 pending changes");
+  await desktop.applyDraft();
+
+  expect((await desktop.calls("unsubscribe")).map((call) => call.value).sort()).toEqual(
+    unsubscribeIds,
+  );
+  for (const name of unsubscribeNames) {
+    await expect(desktop.row(desktop.inactive, name)).toBeVisible();
+  }
+});
+
+test("bulk inactive unsubscribe includes hidden mods and preserves the active configuration", async ({
+  desktop,
+}) => {
+  const configBefore = await readFile(desktop.config, "utf8");
+  const cleanup = desktop.page
+    .locator("header")
+    .getByRole("button", { name: "Unsubscribe all non-active mods" });
+
+  await desktop.library.getByRole("textbox", { name: "Search library mods" }).fill("Guns");
+  await expect(desktop.library.getByRole("listitem")).toHaveCount(1);
+  await cleanup.click();
+
+  await expect(desktop.page.locator(".draft-bar")).toContainText("2 pending changes");
+  expect(await desktop.calls("unsubscribe")).toEqual([]);
+  const dialog = await desktop.reviewDraft();
+  await expect(dialog.locator(".draft-review-list strong")).toHaveText([
+    sampleMods.spare.name,
+    sampleMods.other.name,
+  ]);
+  expect(await desktop.calls("unsubscribe")).toEqual([]);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await desktop.applyDraft();
+
+  expect((await desktop.calls("unsubscribe")).map((call) => call.value)).toEqual([
+    sampleMods.spare.id,
+    sampleMods.other.id,
+  ]);
+  expect((await desktop.mod(sampleMods.spare.id)).subscribed).toBe(false);
+  expect((await desktop.mod(sampleMods.other.id)).subscribed).toBe(false);
+  expect(await readFile(desktop.config, "utf8")).toBe(configBefore);
+  await expect(desktop.subscribed.getByRole("listitem")).toHaveCount(4);
+});
+
+test("active mods expose no context subscription action and remain protected by Mod Info and IPC", async ({
+  desktop,
+}) => {
+  const active = desktop.row(desktop.active, sampleMods.harmony.name);
+  await active.locator(".mod-row-main").click();
+  const unsubscribe = desktop.info.getByRole("button", { name: "Unsubscribe", exact: true });
+  await expect(unsubscribe).toBeDisabled();
+  await expect(unsubscribe).toHaveAttribute("title", "Deactivate this mod before unsubscribing");
+
+  await active.click({ button: "right" });
+  await expect(desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
+  ).toHaveCount(0);
+  await expect(desktop.page.getByRole("menuitem", { name: "Remove", exact: true })).toBeDisabled();
   await desktop.page.keyboard.press("Escape");
+
   const error = await desktop.page.evaluate(async (id) => {
     if (!window.modStore) {
       throw new Error("Desktop preload API is missing");
@@ -84,145 +197,199 @@ test("Active unsubscribe is guarded in rows, context menus and the privileged IP
   expect(await desktop.calls("unsubscribe")).toEqual([]);
 });
 
-test("bulk cleanup includes hidden non-active mods and protects Active mods", async ({
+test("a failed inactive subscription remains staged and keeps every saved record", async ({
   desktop,
 }) => {
-  const game = await readFile(desktop.config, "utf8");
-  await desktop.subscribed.getByRole("textbox", { name: "Search workshop mods" }).fill("Harmony");
-  await desktop.page
-    .locator("header")
-    .getByRole("button", { name: "Unsubscribe all non-active mods" })
-    .click();
-  const dialog = await desktop.reviewDraft();
-  await expect(dialog.locator(".draft-review-list strong")).toHaveText([
-    sampleMods.spare.name,
-    sampleMods.other.name,
-  ]);
-  expect(await desktop.calls("unsubscribe")).toEqual([]);
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  await desktop.applyDraft();
-  await expect
-    .poll(async () => (await desktop.calls("unsubscribe")).map((call) => call.value))
-    .toEqual([sampleMods.spare.id, sampleMods.other.id]);
-  await expect(desktop.row(desktop.library, sampleMods.spare.name)).toBeVisible();
-  expect((await desktop.vault()).mods).toHaveLength(8);
-  expect(await readFile(desktop.config, "utf8")).toBe(game);
-});
+  const row = desktop.row(desktop.inactive, sampleMods.weapons.name);
+  await row.locator(".mod-row-main").click();
+  await desktop.info.getByRole("button", { name: "Subscribe", exact: true }).click();
+  await desktop.setControls({ failSubscriptionIds: [sampleMods.weapons.id] });
 
-test("rechecks game configuration after preview and refuses newly active mods", async ({
-  desktop,
-}) => {
-  await desktop.page
-    .locator("header")
-    .getByRole("button", { name: "Unsubscribe all non-active mods" })
-    .click();
-  const dialog = await desktop.reviewDraft();
-  await expect(dialog).toBeVisible();
-  await writeFile(
-    desktop.config,
-    configXml([...initialActivePackages, sampleMods.spare.packageId]),
-  );
-  await dialog.getByRole("button", { name: "Apply 2 changes" }).click();
-  await expect(desktop.page.getByRole("alert")).toContainText("Active mods cannot be unsubscribed");
-  expect(await desktop.calls("unsubscribe")).toEqual([]);
-  await expect(
-    desktop.page.getByRole("button", { name: "Manage Tags", exact: true }),
-  ).toBeEnabled();
-});
-
-test("partial subscription failure preserves confirmed changes and every saved mod", async ({
-  desktop,
-}) => {
-  await desktop.setControls({ failSubscriptionIds: [sampleMods.other.id] });
-  await desktop.page
-    .locator("header")
-    .getByRole("button", { name: "Unsubscribe all non-active mods" })
-    .click();
   const review = await desktop.reviewDraft();
-  await review.getByRole("button", { name: "Apply 2 changes" }).click();
+  await review.getByRole("button", { name: "Apply 1 change", exact: true }).click();
+  const result = desktop.page.getByRole("dialog", { name: "Apply changes", exact: true });
   await expect(desktop.page.getByRole("alert")).toContainText(
     "Simulated Steam subscription failure",
   );
-  await expect(desktop.row(desktop.library, sampleMods.spare.name)).toBeVisible();
-  await expect(desktop.row(desktop.library, sampleMods.other.name)).toContainText(
-    "Pending unsubscribe",
-  );
-  expect((await desktop.mod(sampleMods.other.id)).subscribed).toBe(true);
+  await expect(result).toContainText("1 change remains in the draft");
+  await result
+    .locator(".app-modal-actions")
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+
+  await expect(row).toContainText("Pending subscribe");
+  expect((await desktop.mod(sampleMods.weapons.id)).subscribed).toBe(false);
   expect((await desktop.vault()).mods).toHaveLength(8);
-  expect(await desktop.calls("unsubscribe")).toEqual([
-    { kind: "unsubscribe", value: sampleMods.spare.id },
-  ]);
+  expect(await desktop.calls("subscribe")).toEqual([]);
 });
 
-test("Steam disappearing after startup reports an error and unlocks the UI", async ({
-  desktop,
-}) => {
-  const subscribe = desktop.library.getByRole("button", {
-    name: `Subscribe to ${sampleMods.weapons.name}`,
-    exact: true,
+test.describe("Offline Steam", () => {
+  test.use({ scenario: "offline" });
+
+  test("subscription changes stage offline and report Steam only when confirmation is attempted", async ({
+    desktop,
+  }) => {
+    expect(
+      (await desktop.calls("ipc")).filter((call) => call.value === ipcChannels.getSteamStatus),
+    ).toEqual([]);
+    const cleanup = desktop.page
+      .locator("header")
+      .getByRole("button", { name: "Unsubscribe all non-active mods" });
+    await expect(cleanup).toBeEnabled();
+
+    const unsubscribed = desktop.row(desktop.inactive, sampleMods.weapons.name);
+    await unsubscribed.locator(".mod-row-main").click();
+    const subscribe = desktop.info.getByRole("button", { name: "Subscribe", exact: true });
+    await expect(subscribe).toBeEnabled();
+    await unsubscribed.click({ button: "right" });
+    await expect(
+      desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }),
+    ).toBeEnabled();
+    await desktop.page.keyboard.press("Escape");
+
+    const subscribed = desktop.row(desktop.inactive, sampleMods.spare.name);
+    await subscribed.locator(".mod-row-main").click();
+    await expect(
+      desktop.info.getByRole("button", { name: "Unsubscribe", exact: true }),
+    ).toBeEnabled();
+    await subscribed.click({ button: "right" });
+    await expect(
+      desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
+    ).toBeEnabled();
+    await desktop.page.keyboard.press("Escape");
+
+    await unsubscribed.locator(".mod-row-main").click();
+    await subscribe.click();
+    await expect(unsubscribed).toContainText("Pending subscribe");
+    expect(
+      (await desktop.calls("ipc")).filter((call) => call.value === ipcChannels.getSteamStatus),
+    ).toEqual([]);
+
+    const review = await desktop.reviewDraft();
+    const apply = review.getByRole("button", { name: "Apply 1 change", exact: true });
+    await expect(apply).toBeEnabled();
+    await apply.click();
+
+    const result = desktop.page.getByRole("dialog", { name: "Apply changes", exact: true });
+    await expect(desktop.page.getByRole("alert")).toContainText(
+      "Start Steam and sign in before changing mod subscriptions",
+    );
+    await expect(result).toContainText("1 change remains in the draft");
+    expect(
+      (await desktop.calls("ipc")).filter((call) => call.value === ipcChannels.getSteamStatus),
+    ).toHaveLength(1);
+    expect(await desktop.calls("subscribe")).toEqual([]);
+    await result
+      .locator(".app-modal-actions")
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+    await expect(unsubscribed).toContainText("Pending subscribe");
   });
-  await expect(subscribe).toBeEnabled();
-  await desktop.setControls({ steamRunning: false });
-  await subscribe.click();
-  const review = await desktop.reviewDraft();
-  await review.getByRole("button", { name: "Apply 1 change", exact: true }).click();
-  await expect(desktop.page.getByRole("alert")).toContainText("Start Steam");
-  const applying = desktop.page.getByRole("dialog", { name: "Apply changes", exact: true });
-  await applying
-    .locator(".app-modal-actions")
-    .getByRole("button", { name: "Close", exact: true })
-    .click();
-  await expect(desktop.row(desktop.subscribed, sampleMods.weapons.name)).toContainText(
-    "Pending subscribe",
-  );
-  await desktop.library.getByRole("textbox", { name: "Search library mods" }).fill("Camera");
-  await expect(desktop.library.getByRole("listitem")).toHaveCount(1);
-  await desktop.page.getByRole("button", { name: "Manage Tags", exact: true }).click();
-  await expect(desktop.page.getByRole("dialog", { name: "Tags", exact: true })).toBeVisible();
-  expect(await desktop.calls("subscribe")).toEqual([]);
+
+  test("destructive library actions stage offline and fail atomically only at confirmation", async ({
+    desktop,
+  }) => {
+    await expect
+      .poll(async () => {
+        const mod = await desktop.mod(sampleMods.other.id);
+        return { gameVersions: mod.gameVersions, localPath: mod.localPath };
+      })
+      .toEqual({
+        gameVersions: ["1.6"],
+        localPath: join(desktop.workshop, sampleMods.other.id),
+      });
+    const vaultBefore = await desktop.vault();
+    const configBefore = await readFile(desktop.config, "utf8");
+    const expectedPendingChanges = [
+      { action: "unsubscribe", workshopId: sampleMods.other.id },
+      { action: "remove", workshopId: sampleMods.other.id },
+      { action: "unsubscribe", workshopId: sampleMods.spare.id },
+    ];
+    const savedPendingChanges = async () =>
+      (await desktop.vault()).pendingDraft?.changes.map(({ action, target }) => ({
+        action,
+        workshopId: target.workshopId,
+      }));
+    const expectLibraryUnchanged = async () => {
+      const current = await desktop.vault();
+      expect(current.mods).toEqual(vaultBefore.mods);
+      expect(current.userTags).toEqual(vaultBefore.userTags);
+      expect(current.localSteamState).toEqual(vaultBefore.localSteamState);
+      expect(current.settings).toEqual(vaultBefore.settings);
+    };
+    const steamStatusCalls = async () =>
+      (await desktop.calls("ipc")).filter((call) => call.value === ipcChannels.getSteamStatus);
+    const mutationCalls = async () =>
+      (await desktop.calls("ipc"))
+        .map((call) => call.value)
+        .filter(
+          (channel) =>
+            channel === ipcChannels.setSubscription || channel === ipcChannels.deleteLibraryMods,
+        );
+
+    expect(await steamStatusCalls()).toEqual([]);
+
+    const other = desktop.row(desktop.inactive, sampleMods.other.name);
+    await other.locator(".mod-row-main").click();
+    const unsubscribe = desktop.info.getByRole("button", {
+      name: "Unsubscribe",
+      exact: true,
+    });
+    const remove = desktop.info.getByRole("button", { name: "Removed", exact: true });
+    await expect(unsubscribe).toBeEnabled();
+    await expect(remove).toBeEnabled();
+
+    await unsubscribe.click();
+    await expect(other).toContainText("Pending unsubscribe");
+    await remove.click();
+    await expect(other).toContainText("Pending removal");
+
+    const cleanup = desktop.page
+      .locator("header")
+      .getByRole("button", { name: "Unsubscribe all non-active mods" });
+    await expect(cleanup).toBeEnabled();
+    await cleanup.click();
+
+    const spare = desktop.row(desktop.inactive, sampleMods.spare.name);
+    await expect(spare).toContainText("Pending unsubscribe");
+    await expect(desktop.page.locator(".draft-bar")).toContainText("3 pending changes");
+    expect(await steamStatusCalls()).toEqual([]);
+    expect(await mutationCalls()).toEqual([]);
+    await expect.poll(savedPendingChanges).toEqual(expectedPendingChanges);
+    await expectLibraryUnchanged();
+    expect(await readFile(desktop.config, "utf8")).toBe(configBefore);
+
+    const review = await desktop.reviewDraft();
+    await review.getByRole("checkbox").check();
+    await review.getByRole("button", { name: "Apply 3 changes", exact: true }).click();
+
+    const result = desktop.page.getByRole("dialog", { name: "Apply changes", exact: true });
+    await expect(desktop.page.getByRole("alert")).toContainText(
+      "Start Steam and sign in before changing mod subscriptions",
+    );
+    await expect(result).toContainText("3 changes remain in the draft");
+    expect(await steamStatusCalls()).toHaveLength(1);
+    expect(await mutationCalls()).toEqual([]);
+    expect(await desktop.calls("unsubscribe")).toEqual([]);
+    await expect.poll(savedPendingChanges).toEqual(expectedPendingChanges);
+    await expectLibraryUnchanged();
+    expect(await readFile(desktop.config, "utf8")).toBe(configBefore);
+
+    await result
+      .locator(".app-modal-actions")
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+    await expect(other).toContainText("Pending unsubscribe");
+    await expect(other).toContainText("Pending removal");
+    await expect(spare).toContainText("Pending unsubscribe");
+    await expect(desktop.page.locator(".draft-bar")).toContainText("3 pending changes");
+  });
 });
 
-test("RimWorld running blocks unsubscribe without breaking tag editing", async ({ desktop }) => {
-  await desktop.setControls({ gameRunning: true });
-  await desktop.subscribed
-    .getByRole("button", { name: `Unsubscribe from ${sampleMods.spare.name}`, exact: true })
-    .click();
-  const review = await desktop.reviewDraft();
-  await review.getByRole("button", { name: "Apply 1 change", exact: true }).click();
-  await expect(desktop.page.getByRole("alert")).toContainText("Close RimWorld");
-  expect(await desktop.calls("unsubscribe")).toEqual([]);
-  await desktop.page
-    .getByRole("dialog", { name: "Apply changes", exact: true })
-    .locator(".app-modal-actions")
-    .getByRole("button", { name: "Close", exact: true })
-    .click();
-  await desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main").click();
-  await desktop.info.getByRole("checkbox", { name: sampleTags.combat.name }).check();
-  await expect
-    .poll(async () => (await desktop.mod(sampleMods.camera.id)).userTagIds)
-    .toContain(sampleTags.combat.id);
-});
-
-test("context menu subscriptions apply to all selected mods", async ({ desktop }) => {
-  await desktop.row(desktop.library, sampleMods.weapons.name).locator(".mod-row-main").click();
-  await desktop
-    .row(desktop.library, sampleMods.tribal.name)
-    .locator(".mod-row-main")
-    .click({ modifiers: ["ControlOrMeta"] });
-  await desktop.row(desktop.library, sampleMods.weapons.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }).click();
-  await expect(desktop.page.locator(".draft-bar")).toContainText("2 pending changes");
-  expect(await desktop.calls("subscribe")).toEqual([]);
-  await desktop.applyDraft();
-  await expect(desktop.row(desktop.subscribed, sampleMods.weapons.name)).toBeVisible();
-  await expect(desktop.row(desktop.subscribed, sampleMods.tribal.name)).toBeVisible();
-  expect((await desktop.calls("subscribe")).map((call) => call.value).sort()).toEqual([
-    sampleMods.weapons.id,
-    sampleMods.tribal.id,
-  ]);
-});
-
-test("sync imports discovered mods and retains records that disappeared from Workshop", async ({
+test("sync retains disappeared records and imports subscribed mods as inactive", async ({
   desktop,
 }) => {
   await rm(join(desktop.workshop, sampleMods.other.id), { recursive: true });
@@ -235,14 +402,17 @@ test("sync imports discovered mods and retains records that disappeared from Wor
     subscribed: true,
   };
   await desktop.install(imported);
+
   await desktop.page.getByRole("button", { name: "Sync Workshop", exact: true }).click();
+
   await expect(
     desktop.page
       .getByRole("status")
       .filter({ hasText: "Workshop folders synchronized; saved mods retained" }),
   ).toBeVisible();
-  await expect(desktop.row(desktop.library, sampleMods.other.name)).toBeVisible();
-  await expect(desktop.row(desktop.subscribed, imported.name)).toBeVisible();
+  await expect(desktop.row(desktop.inactive, sampleMods.other.name)).toBeVisible();
+  await expect(desktop.row(desktop.inactive, imported.name)).toBeVisible();
+  await expect(desktop.row(desktop.active, imported.name)).toHaveCount(0);
   expect((await desktop.vault()).mods).toHaveLength(9);
   expect((await desktop.mod(sampleMods.other.id)).userTagIds).toContain(sampleTags.combat.id);
   expect((await desktop.mod("301")).packageId).toBe(imported.packageId);
@@ -250,122 +420,9 @@ test("sync imports discovered mods and retains records that disappeared from Wor
   expect(await desktop.calls("unsubscribe")).toEqual([]);
 });
 
-test.describe("Offline Steam", () => {
-  test.use({ scenario: "offline" });
-  test("offline Steam disables subscription controls, preserves tags and reenables on reconnection", async ({
-    desktop,
-  }) => {
-    await expect(
-      desktop.library.getByRole("button", { name: `Subscribe to ${sampleMods.camera.name}` }),
-    ).toBeDisabled();
-    await expect(
-      desktop.subscribed.getByRole("button", { name: `Unsubscribe from ${sampleMods.spare.name}` }),
-    ).toBeDisabled();
-    await expect(
-      desktop.page
-        .locator("header")
-        .getByRole("button", { name: "Unsubscribe all non-active mods" }),
-    ).toBeDisabled();
-    await expect(
-      desktop.page.getByRole("button", { name: "Sync Workshop", exact: true }),
-    ).toBeEnabled();
-    await desktop.row(desktop.library, sampleMods.camera.name).click({ button: "right" });
-    await expect(
-      desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
-    ).toBeDisabled();
-    await expect(
-      desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }),
-    ).toBeEnabled();
-    await desktop.page.keyboard.press("Escape");
-    await desktop.row(desktop.subscribed, sampleMods.spare.name).click({ button: "right" });
-    await expect(
-      desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
-    ).toBeDisabled();
-    await expect(
-      desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }),
-    ).toBeEnabled();
-    await desktop.page.keyboard.press("Escape");
-    await desktop.row(desktop.library, sampleMods.camera.name).locator(".mod-row-main").click();
-    await desktop.info.getByRole("checkbox", { name: sampleTags.combat.name }).check();
-    await expect
-      .poll(async () => (await desktop.mod(sampleMods.camera.id)).userTagIds)
-      .toContain(sampleTags.combat.id);
-    expect(await desktop.calls("subscribe")).toEqual([]);
-    expect(await desktop.calls("unsubscribe")).toEqual([]);
-    await desktop.setControls({ steamRunning: true });
-    await desktop.page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(
-      desktop.library.getByRole("button", { name: `Subscribe to ${sampleMods.camera.name}` }),
-    ).toBeEnabled();
-    await expect(
-      desktop.subscribed.getByRole("button", { name: `Unsubscribe from ${sampleMods.spare.name}` }),
-    ).toBeEnabled();
-    await expect(
-      desktop.page
-        .locator("header")
-        .getByRole("button", { name: "Unsubscribe all non-active mods" }),
-    ).toBeEnabled();
-    await desktop.row(desktop.library, sampleMods.camera.name).click({ button: "right" });
-    await expect(
-      desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
-    ).toBeEnabled();
-  });
-});
-
-test("losing Steam disables new subscription drafts while keeping local Undo available", async ({
+test("IPC rejects malformed subscription mutations before they reach Steam", async ({
   desktop,
 }) => {
-  const camera = desktop.library.getByRole("button", {
-    name: `Subscribe to ${sampleMods.camera.name}`,
-  });
-  await expect(camera).toBeEnabled();
-  await desktop.subscribed
-    .getByRole("button", { name: `Unsubscribe from ${sampleMods.spare.name}` })
-    .click();
-  const pending = desktop.row(desktop.library, sampleMods.spare.name);
-  await expect(pending).toContainText("Pending unsubscribe");
-  await desktop.setControls({ steamRunning: false });
-  await desktop.page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(camera).toBeDisabled();
-  await expect(
-    desktop.page.locator("header").getByRole("button", { name: "Unsubscribe all non-active mods" }),
-  ).toBeDisabled();
-  const undo = pending.getByRole("button", {
-    name: `Undo pending change for ${sampleMods.spare.name}`,
-  });
-  await expect(undo).toBeEnabled();
-  await undo.click();
-  await expect(desktop.row(desktop.subscribed, sampleMods.spare.name)).toBeVisible();
-  await expect(desktop.page.locator(".draft-bar")).toContainText("0 pending changes");
-  await expect(
-    desktop.page
-      .locator(".draft-bar")
-      .getByRole("button", { name: "Confirm changes", exact: true }),
-  ).toBeDisabled();
-  expect(await desktop.calls("subscribe")).toEqual([]);
-  expect(await desktop.calls("unsubscribe")).toEqual([]);
-});
-
-test("a readable empty Workshop scan moves mods to Library without deleting records", async ({
-  desktop,
-}) => {
-  const game = await readFile(desktop.config, "utf8");
-  for (const name of await readdir(desktop.workshop)) {
-    await rm(join(desktop.workshop, name), { recursive: true });
-  }
-  await desktop.page.getByRole("button", { name: "Sync Workshop", exact: true }).click();
-  await expect(desktop.subscribed.getByRole("listitem")).toHaveCount(0);
-  await expect(desktop.library.getByRole("listitem")).toHaveCount(8);
-  await expect(
-    desktop.page.getByRole("button", { name: "Manage Tags", exact: true }),
-  ).toBeEnabled();
-  expect((await desktop.vault()).mods).toHaveLength(8);
-  expect((await desktop.vault()).userTags).toEqual(Object.values(sampleTags));
-  expect(await readFile(desktop.config, "utf8")).toBe(game);
-  expect(await desktop.calls("unsubscribe")).toEqual([]);
-});
-
-test("IPC rejects malformed mutations before they reach Steam", async ({ desktop }) => {
   const error = await desktop.page.evaluate(async () => {
     if (!window.modStore) {
       throw new Error("Desktop preload API is missing");

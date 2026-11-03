@@ -2,7 +2,7 @@
   "name": "rimlib",
   "productName": "RimLib",
   "version": "0.1.0",
-  "description": "Electron TypeScript desktop app for preserving and classifying RimWorld Workshop mods.",
+  "description": "Electron desktop app for managing a RimWorld mod library, active list, and load order.",
   "license": "MIT",
   "private": true,
   "type": "module",

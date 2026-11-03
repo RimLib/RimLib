@@ -73,48 +73,57 @@ const props: Omit<ModsPanelProps, "mode"> = {
   onUnsubscribe: noop,
 };
 
-void test("offline or busy Steam disables row and bulk actions, not mod selection or filters", () => {
-  for (const reason of [
-    "Start Steam before changing subscriptions",
-    "An operation is in progress",
-  ]) {
-    const disabledProps = {
-      ...props,
-      subscriptionDisabled: true,
-      subscriptionDisabledReason: reason,
-    };
-    const html = renderToStaticMarkup(
-      <>
-        <AppHeader
-          notice="Ready"
-          disabled={false}
-          cleanupDisabledReason={reason}
-          onOpenSettings={noop}
-          onManageTags={noop}
-          onSync={noop}
-          onUnsubscribeInactive={noop}
-        />
-        <ModsPanel {...disabledProps} mode="unsubscribed" mods={[mod("3")]} totalCount={1} />
-        <SubscribedModsPanel {...disabledProps} mods={[mod("1", true)]} totalCount={1} />
-      </>,
-    );
-    const buttons = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]);
-    const subscriptionButtons = buttons.filter((button) =>
-      /aria-label="(?:Subscribe|Unsubscribe)/.test(button),
-    );
-    assert.equal(subscriptionButtons.length, 3);
-    assert.ok(subscriptionButtons.every((button) => button.includes('disabled=""')));
-    assert.doesNotMatch(html, /Delete all library mods/);
-    const selectionButtons = buttons.filter((button) => button.includes('class="mod-row-main"'));
-    assert.equal(selectionButtons.length, 2);
-    assert.ok(selectionButtons.every((button) => !button.includes("disabled")));
-    assert.doesNotMatch(html, /<(?:input|select)[^>]*disabled/);
-    assert.match(html, new RegExp(`data-tip="${reason}"`));
-    assert.match(html, /Quality of life/);
-  }
+void test("an in-progress operation locks draft controls, not mod selection or filters", () => {
+  const reason = "An operation is in progress";
+  const disabledProps = {
+    ...props,
+    subscriptionDisabled: true,
+    subscriptionDisabledReason: reason,
+  };
+  const html = renderToStaticMarkup(
+    <>
+      <AppHeader
+        notice="Ready"
+        disabled={false}
+        cleanupDisabledReason={reason}
+        onOpenSettings={noop}
+        onManageTags={noop}
+        onSync={noop}
+        onUnsubscribeInactive={noop}
+      />
+      <ModInfoPanel
+        mod={mod("3")}
+        tags={requireValue(vault.userTags)}
+        subscriptionDisabledReason={reason}
+        onSubscribe={noop}
+        onUnsubscribe={noop}
+        onRemoveModFromLibrary={noop}
+        onAssignTag={noop}
+        onCreateTag={noop}
+      />
+      <ModsPanel {...disabledProps} mode="unsubscribed" mods={[mod("3")]} totalCount={1} />
+      <SubscribedModsPanel {...disabledProps} mods={[mod("1", true)]} totalCount={1} />
+    </>,
+  );
+  const buttons = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]);
+  const subscriptionButtons = buttons.filter((button) => button.includes('class="primary-action"'));
+  assert.equal(subscriptionButtons.length, 1);
+  assert.ok(requireValue(subscriptionButtons[0]).includes('disabled=""'));
+  const cleanupButtons = buttons.filter((button) =>
+    button.includes('aria-label="Unsubscribe all non-active mods"'),
+  );
+  assert.equal(cleanupButtons.length, 1);
+  assert.ok(requireValue(cleanupButtons[0]).includes('disabled=""'));
+  assert.doesNotMatch(html, /Delete all library mods/);
+  const selectionButtons = buttons.filter((button) => button.includes('class="mod-row-main"'));
+  assert.equal(selectionButtons.length, 2);
+  assert.ok(selectionButtons.every((button) => !button.includes("disabled")));
+  assert.doesNotMatch(html, /<(?:input|select)[^>]*disabled/);
+  assert.match(html, new RegExp(`title="${reason}"`));
+  assert.match(html, /Quality of life/);
 });
 
-void test("subscription buttons reenable when Steam is running", () => {
+void test("Mod Info subscription is enabled when no operation is in progress", () => {
   const html = renderToStaticMarkup(
     <>
       <AppHeader
@@ -125,19 +134,26 @@ void test("subscription buttons reenable when Steam is running", () => {
         onSync={noop}
         onUnsubscribeInactive={noop}
       />
+      <ModInfoPanel
+        mod={mod("3")}
+        tags={[]}
+        onSubscribe={noop}
+        onUnsubscribe={noop}
+        onRemoveModFromLibrary={noop}
+        onAssignTag={noop}
+        onCreateTag={noop}
+      />
       <ModsPanel {...props} mode="unsubscribed" mods={[mod("3")]} />
       <SubscribedModsPanel {...props} mods={[mod("1", true)]} />
     </>,
   );
   const buttons = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]);
-  const subscriptionButtons = buttons.filter((button) =>
-    /aria-label="(?:Subscribe|Unsubscribe)/.test(button),
-  );
-  assert.equal(subscriptionButtons.length, 3);
-  assert.ok(subscriptionButtons.every((button) => !button.includes("disabled")));
+  const subscriptionButtons = buttons.filter((button) => button.includes('class="primary-action"'));
+  assert.equal(subscriptionButtons.length, 1);
+  assert.ok(!requireValue(subscriptionButtons[0]).includes("disabled"));
 });
 
-void test("offline Steam does not block Undo but applying drafts locks it", () => {
+void test("the draft lock leaves pending rows selectable", () => {
   for (const draftDisabled of [false, true]) {
     const html = renderToStaticMarkup(
       <ModRow
@@ -145,8 +161,6 @@ void test("offline Steam does not block Undo but applying drafts locks it", () =
         tags={[]}
         selected={false}
         subscriptionAction="subscribe"
-        subscriptionDisabled
-        subscriptionDisabledReason="Start Steam first"
         draftDisabled={draftDisabled}
         pendingAction="unsubscribe"
         onUndoDraft={noop}
@@ -154,10 +168,10 @@ void test("offline Steam does not block Undo but applying drafts locks it", () =
         onToggle={noop}
       />,
     );
-    const button = requireValue(
-      /<button[^>]*aria-label="Undo pending change for Mod 3"[^>]*>/.exec(html),
-    )[0];
-    assert.equal(button.includes('disabled=""'), draftDisabled);
+    assert.match(html, /Pending unsubscribe/);
+    assert.doesNotMatch(html, /Subscribe to|Unsubscribe from/);
+    const button = requireValue(/<button[^>]*class="mod-row-main"[^>]*>/.exec(html))[0];
+    assert.ok(!button.includes('disabled=""'));
   }
 });
 
@@ -249,7 +263,7 @@ void test("unsubscribed library mods never inherit Active from Harmony packages,
       activeOrder={panels.activeOrder}
     />,
   );
-  assert.doesNotMatch(center, /class="active-pill"/);
+  assert.doesNotMatch(center, /class="load-order-number"/);
   for (const entry of panels.unsubscribed) {
     assert.equal(entry.subscribed, false);
     const info = renderToStaticMarkup(
@@ -338,66 +352,68 @@ void test("both subscription lists support scoped search and download sorting in
   );
 });
 
-void test("both panels show assigned tags, directional Steam actions and consistent filtered counts", () => {
-  const panels = build();
+void test("both activity panels show assigned tags, double-click directions and consistent counts", () => {
+  const inactive = [mod("3"), mod("4", true)];
+  const activeMods = [mod("2", true), mod("1", true)];
   const center = renderToStaticMarkup(
-    <ModsPanel {...props} mode="unsubscribed" mods={panels.unsubscribed} totalCount={1} />,
+    <ModsPanel {...props} mode="unsubscribed" mods={inactive} totalCount={2} />,
   );
   const right = renderToStaticMarkup(
     <SubscribedModsPanel
       {...props}
-      mods={panels.subscribed}
-      totalCount={3}
-      sort="active"
-      activeIds={panels.activeIds}
-      activeOrder={panels.activeOrder}
+      mods={activeMods}
+      totalCount={2}
+      sort="load-order"
+      activeIds={new Set(activeMods.map(({ id }) => id))}
+      activeOrder={new Map(activeMods.map(({ id }, index) => [id, index + 1]))}
     />,
   );
-  assert.match(center, /Unsubscribed library mods/);
+  assert.match(center, /<h2[^>]*>Library<\/h2>/);
+  assert.match(center, /aria-label="Library mods"/);
   assert.match(center, /Quality of life/);
-  assert.match(center, /Subscribe to Mod 3/);
+  assert.match(center, /Double-click to stage activation/);
   assert.match(right, /Quality of life/);
-  assert.match(right, /Unsubscribe from Mod 4/);
+  assert.match(right, /Double-click to stage deactivation/);
   assert.match(right, /2 active/);
-  assert.doesNotMatch(right, /Load order|>#\d+</);
+  assert.match(right, /class="load-order-number" aria-label="Load order \d+">\d+<\/span>/);
+  assert.doesNotMatch(center + right, /Subscribe to|Unsubscribe from/);
   assert.doesNotMatch(center + right, /Unsubscribe all non-active mods|Delete all library mods/);
-  assert.doesNotMatch(center + right, /Apply Active|Unapplied draft|Add .* to Active/);
+  assert.doesNotMatch(center + right, /Apply Active|Unapplied draft/);
 });
 
-void test("subscribe actions are last in Library rows and unsubscribe actions are first in subscribed rows", () => {
+void test("activity rows use one content column and no inline subscription action columns", () => {
   const center = renderToStaticMarkup(
     <ModsPanel {...props} mode="unsubscribed" mods={[mod("3")]} totalCount={1} />,
   );
   const right = renderToStaticMarkup(
     <SubscribedModsPanel {...props} mods={[mod("1", true)]} totalCount={1} />,
   );
-  const libraryRow = center.slice(center.indexOf('role="listitem"'));
-  const subscribedRow = right.slice(right.indexOf('role="listitem"'));
-  assert.ok(
-    libraryRow.indexOf('class="mod-row-main"') <
-      libraryRow.indexOf('aria-label="Subscribe to Mod 3"'),
-  );
-  assert.ok(
-    subscribedRow.indexOf('aria-label="Unsubscribe from Mod 1"') <
-      subscribedRow.indexOf('class="mod-row-main"'),
-  );
-  assert.match(right, /class="mod-row action-start/);
-  assert.doesNotMatch(center, /class="mod-row action-start/);
-  assert.match(right, /lucide-arrow-left/);
-  assert.match(center, /lucide-arrow-right/);
+  assert.equal((center.match(/class="mod-row-main"/g) ?? []).length, 1);
+  assert.equal((right.match(/class="mod-row-main"/g) ?? []).length, 1);
+  assert.doesNotMatch(center + right, /aria-label="(?:Subscribe|Unsubscribe)|action-start/);
+  assert.match(center, /Double-click to stage activation/);
+  assert.match(right, /Double-click to stage deactivation/);
 });
 
-void test("both lists omit dates and position numbers while Mod Info retains the download date", () => {
+void test("both lists omit dates while Active shows position and Mod Info retains the date", () => {
   const entry = { ...mod("3"), downloadedAt: "2026-02-17T12:00:00Z" };
   const date = formatDate(entry.downloadedAt);
   const lists = renderToStaticMarkup(
     <>
       <ModsPanel {...props} mode="unsubscribed" mods={[entry]} totalCount={1} />
-      <SubscribedModsPanel {...props} mods={[{ ...entry, subscribed: true }]} totalCount={1} />
+      <SubscribedModsPanel
+        {...props}
+        mods={[{ ...entry, subscribed: true }]}
+        totalCount={1}
+        sort="load-order"
+        activeIds={new Set([entry.id])}
+        activeOrder={new Map([[entry.id, 7]])}
+      />
     </>,
   );
   assert.ok(!lists.includes(date));
-  assert.doesNotMatch(lists, /date-pill|Load order|>#\d+</);
+  assert.doesNotMatch(lists, /date-pill/);
+  assert.match(lists, /class="load-order-number" aria-label="Load order 7">7<\/span>/);
   const info = renderToStaticMarkup(
     <ModInfoPanel
       mod={entry}
@@ -411,19 +427,21 @@ void test("both lists omit dates and position numbers while Mod Info retains the
   assert.ok(info.includes(date));
 });
 
-void test("unreadable Active does not turn every subscription into an inactive mod or block tag management", () => {
+void test("unreadable active state blocks activity writes without blocking tag management", () => {
   const state = { ...active, packageIds: [], error: "Config unreadable" };
   const panels = build(vault, state);
   assert.equal(panels.activeIds.size, 0);
   const html = renderToStaticMarkup(
-    <SubscribedModsPanel
+    <ModsPanel
       {...props}
-      mods={panels.subscribed}
-      totalCount={3}
+      mode="unsubscribed"
+      mods={panels.unsubscribed}
+      totalCount={panels.unsubscribed.length}
       activeError={state.error}
     />,
   );
-  assert.doesNotMatch(html, /Active status could not be fully verified/);
+  assert.match(html, /title="Config unreadable"/);
+  assert.doesNotMatch(html, /Subscribe to|Unsubscribe from/);
   const header = renderToStaticMarkup(
     <AppHeader
       notice="Ready"
@@ -435,12 +453,13 @@ void test("unreadable Active does not turn every subscription into an inactive m
       onUnsubscribeInactive={noop}
     />,
   );
-  assert.match(header, /Active status could not be fully verified. Cleanup is disabled/);
-  assert.ok(header.indexOf("Ready") < header.indexOf("Active status could not be fully verified"));
-  assert.match(
+  assert.match(header, /Active-list changes and auto-sort are unavailable/);
+  assert.ok(header.indexOf("Ready") < header.indexOf("Active-list changes"));
+  assert.doesNotMatch(
     header,
-    /Unsubscribe all non-active mods[^>]*><button[^>]*disabled|disabled[^>]*Unsubscribe all non-active mods/,
+    /aria-label="Unsubscribe all non-active mods"[^>]*disabled|disabled[^>]*aria-label="Unsubscribe all non-active mods"/,
   );
+  assert.match(header, /title="Config unreadable"/);
   assert.equal(getModActivity(mod("4"), state), "unknown");
 });
 
@@ -501,7 +520,7 @@ void test("long disconnected-drive errors stay in tooltips, keep both mod panels
       <AppHeader
         notice="Ready"
         workshopError={details}
-        activeError={details}
+        metadataError={details}
         disabled={false}
         onOpenSettings={noop}
         onManageTags={noop}
@@ -513,7 +532,7 @@ void test("long disconnected-drive errors stay in tooltips, keep both mod panels
         {...props}
         mods={panels.subscribed}
         totalCount={3}
-        activeError={details}
+        metadataError={details}
         activeIds={panels.activeIds}
         activeOrder={panels.activeOrder}
       />
@@ -524,11 +543,15 @@ void test("long disconnected-drive errors stay in tooltips, keep both mod panels
   assert.match(html, /title="Cannot read \/Volumes\/Very long/);
   assert.match(html, /Workshop unavailable/);
   assert.match(html, /Search library mods/);
-  assert.match(html, /Search subscribed mods/);
+  assert.match(html, /Search active mods/);
   assert.doesNotMatch(html, /<button[^>]*disabled[^>]*aria-label="Manage Tags"/);
+  assert.doesNotMatch(
+    html,
+    /aria-label="Unsubscribe all non-active mods"[^>]*disabled|disabled[^>]*aria-label="Unsubscribe all non-active mods"/,
+  );
 });
 
-void test("global tag management, Steam synchronization and cleanup appear once in the app header, not in either list", () => {
+void test("global tag management, Steam synchronization and inactive cleanup appear once in the header", () => {
   const header = renderToStaticMarkup(
     <AppHeader
       notice="Ready"
@@ -542,6 +565,10 @@ void test("global tag management, Steam synchronization and cleanup appear once 
   assert.equal((header.match(/aria-label="Manage Tags"/g) ?? []).length, 1);
   assert.equal((header.match(/aria-label="Sync Workshop"/g) ?? []).length, 1);
   assert.equal((header.match(/aria-label="Unsubscribe all non-active mods"/g) ?? []).length, 1);
+  assert.doesNotMatch(
+    requireValue(/<button[^>]*aria-label="Unsubscribe all non-active mods"[^>]*>/.exec(header))[0],
+    /disabled/,
+  );
   const panels = renderToStaticMarkup(
     <>
       <ModsPanel {...props} mode="unsubscribed" />
@@ -556,6 +583,7 @@ void test("global tag management, Steam synchronization and cleanup appear once 
     <AppHeader
       notice="Checking subscriptions"
       disabled
+      cleanupDisabledReason="An operation is in progress"
       onOpenSettings={noop}
       onManageTags={noop}
       onSync={noop}
@@ -563,20 +591,21 @@ void test("global tag management, Steam synchronization and cleanup appear once 
     />,
   );
   assert.equal((busy.match(/<button[^>]*disabled/g) ?? []).length, 3);
+  assert.match(busy, /data-tip="An operation is in progress"/);
 });
 
-void test("folder-derived panels retain their scope and subscription actions without redundant per-row status labels", () => {
+void test("folder discovery does not change active panel scope or add row subscription controls", () => {
   const right = renderToStaticMarkup(
     <SubscribedModsPanel {...props} folderBased mods={[mod("1", true)]} totalCount={1} />,
   );
-  assert.match(right, /Local Workshop mods/);
-  assert.match(right, />Workshop<\/h2>/);
+  assert.match(right, /<h2[^>]*>Active<\/h2>/);
   assert.doesNotMatch(right, />Installed<\/span>|>Subscribed<\/span>/);
   const center = renderToStaticMarkup(
     <ModsPanel {...props} mode="unsubscribed" folderBased mods={[mod("2")]} totalCount={1} />,
   );
   assert.doesNotMatch(center, />Not installed<\/span>|>Not subscribed<\/span>/);
-  assert.match(center, /Subscribe to Mod 2/);
+  assert.match(center, /<h2[^>]*>Library<\/h2>/);
+  assert.doesNotMatch(center + right, /Subscribe to|Unsubscribe from/);
 });
 
 void test("uncached subscriptions use current installed metadata or placeholders without restoring deleted records", () => {

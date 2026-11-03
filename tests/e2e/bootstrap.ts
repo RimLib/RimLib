@@ -1,4 +1,13 @@
-import { app, BaseWindow, dialog, ipcMain, type OpenDialogOptions, session, shell } from "electron";
+import {
+  app,
+  BaseWindow,
+  dialog,
+  ipcMain,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+  session,
+  shell,
+} from "electron";
 
 import { type IpcChannel, ipcEvents } from "../../src/shared/ipc";
 import { publishedFileDetailsUrl, RIMWORLD_APP_ID, steamResultCodes } from "../../src/shared/steam";
@@ -35,11 +44,27 @@ const showOpenDialog = async (
   suppliedOptions?: OpenDialogOptions,
 ) => {
   const options = windowOrOptions instanceof BaseWindow ? suppliedOptions : windowOrOptions;
-  const path = options?.properties?.includes("openDirectory") ? paths.workshop : paths.config;
+  const path = options?.properties?.includes("openDirectory")
+    ? paths.workshop
+    : options?.title?.includes("Import")
+      ? paths.modListImport
+      : paths.config;
   record("dialog", path);
   return { canceled: controls().cancelDialog, filePaths: [path] };
 };
 dialog.showOpenDialog = showOpenDialog;
+const showSaveDialog = async (
+  windowOrOptions: BaseWindow | SaveDialogOptions,
+  suppliedOptions?: SaveDialogOptions,
+) => {
+  const options = windowOrOptions instanceof BaseWindow ? suppliedOptions : windowOrOptions;
+  record("dialog", `${options?.title ?? "Save"}: ${paths.modListExport}`);
+  return {
+    canceled: controls().cancelDialog,
+    filePath: controls().cancelDialog ? "" : paths.modListExport,
+  };
+};
+dialog.showSaveDialog = showSaveDialog;
 
 ipcMain.on(ipcEvents.rendererError, (_event, name: unknown, details: unknown) => {
   record("rendererError", JSON.stringify({ name, details }));
@@ -71,6 +96,7 @@ globalThis.fetch = async (input, init) => {
   const current = controls();
   const details = [...init.body.entries()]
     .filter(([key]) => key.startsWith("publishedfileids["))
+    .filter(([, id]) => !current.metadataOmitIds.includes(id))
     .map(([, id]) => ({
       publishedfileid: id,
       result: steamResultCodes.ok,
