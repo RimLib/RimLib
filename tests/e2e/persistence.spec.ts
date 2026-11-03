@@ -62,11 +62,9 @@ test("reopening resets workspace filters and initializes the first Active select
 });
 
 test("reopening closes an open context menu", async ({ desktop }) => {
-  await desktop
-    .row(desktop.library, sampleMods.weapons.name)
-    .locator(".mod-row-main")
-    .click({ button: "right" });
-  await expect(desktop.page.getByRole("menu")).toBeVisible();
+  await desktop.openContextMenu(
+    desktop.row(desktop.library, sampleMods.weapons.name).locator(".mod-row-main"),
+  );
   await desktop.reopen();
   await expect(desktop.page.getByRole("menu")).toHaveCount(0);
 });

@@ -52,6 +52,11 @@ test("refreshes public metadata for an unsubscribed mod without Steam or local c
   await expect(desktop.info.locator(".mod-visual svg")).toBeVisible();
   await desktop.info.getByRole("button", { name: "Refresh mod metadata" }).click();
   await expect(desktop.infoName).toHaveText(`Workshop refreshed ${sampleMods.weapons.id}`);
+  await expect(desktop.info.locator(".mod-visual img")).toHaveCount(0);
+  await expect(desktop.info.locator(".mod-visual svg")).toBeVisible();
+  const refreshedRow = desktop.row(desktop.library, `Workshop refreshed ${sampleMods.weapons.id}`);
+  await expect(refreshedRow.locator(".thumb img")).toHaveCount(0);
+  await expect(refreshedRow.locator(".thumb svg")).toBeVisible();
   const refreshed = await desktop.mod(sampleMods.weapons.id);
   expect(refreshed).toMatchObject({
     packageId: before.packageId,

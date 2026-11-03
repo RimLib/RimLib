@@ -8,7 +8,7 @@ import {
   Tags,
   Trash2,
 } from "lucide-react";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useWorkspaceStore } from "../../stores/WorkspaceStoreProvider";
@@ -300,7 +300,7 @@ export function ModContextMenu({
     ).focus({ preventScroll: true });
   }, [x, y, focusKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const outside = (event: PointerEvent) => {
       if (!container.current?.contains(event.target as Node)) {
         onClose();
@@ -314,19 +314,36 @@ export function ModContextMenu({
       onClose();
       returnFocus.current?.focus({ preventScroll: true });
     };
+    const scrollContainer = returnFocus.current?.closest<HTMLElement>('[role="list"]');
+    const openingScrollPosition = scrollContainer
+      ? { left: scrollContainer.scrollLeft, top: scrollContainer.scrollTop }
+      : undefined;
+    const scroll = () => {
+      // Chromium may deliver a scroll notification after the right-click's reveal scroll has
+      // already finished and this menu has mounted. Ignore that stale notification, but dismiss
+      // the menu once its owning list actually moves away from the opening position.
+      if (
+        scrollContainer &&
+        openingScrollPosition &&
+        (scrollContainer.scrollLeft !== openingScrollPosition.left ||
+          scrollContainer.scrollTop !== openingScrollPosition.top)
+      ) {
+        onClose();
+      }
+    };
     document.addEventListener("pointerdown", outside);
     window.addEventListener("keydown", key);
     window.addEventListener("resize", onClose);
     window.addEventListener("blur", onClose);
-    window.addEventListener("scroll", onClose, true);
+    scrollContainer?.addEventListener("scroll", scroll);
     return () => {
       document.removeEventListener("pointerdown", outside);
       window.removeEventListener("keydown", key);
       window.removeEventListener("resize", onClose);
       window.removeEventListener("blur", onClose);
-      window.removeEventListener("scroll", onClose, true);
+      scrollContainer?.removeEventListener("scroll", scroll);
     };
-  }, [onClose]);
+  }, [focusKey, onClose, x, y]);
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     const buttons = [

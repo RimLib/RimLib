@@ -116,8 +116,8 @@ test("tag colors are readable, rows omit inline actions and context-menu hover i
   await expect(weapons.locator(".user-tag")).toHaveCSS("color", "rgb(255, 255, 255)");
   await expect(camera.locator(".tooltip-action")).toHaveCount(0);
   await expect(weapons.locator(".tooltip-action")).toHaveCount(0);
-  await weapons.click({ button: "right" });
-  const item = desktop.page.getByRole("menuitem", { name: "Add tags", exact: true });
+  const menu = await desktop.openContextMenu(weapons);
+  const item = menu.getByRole("menuitem", { name: "Add tags", exact: true });
   await desktop.page.mouse.move(5, 5);
   const before = await item.evaluate((element) => getComputedStyle(element).backgroundColor);
   await item.hover();
@@ -125,7 +125,32 @@ test("tag colors are readable, rows omit inline actions and context-menu hover i
     .poll(() => item.evaluate((element) => getComputedStyle(element).backgroundColor))
     .not.toBe(before);
   await desktop.page.keyboard.press("Escape");
-  await expect(desktop.page.getByRole("menu")).toHaveCount(0);
+  await expect(menu).toHaveCount(0);
+});
+
+test("context menus ignore stale scroll notifications and close when their list moves", async ({
+  desktop,
+}) => {
+  await desktop.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]?.setSize(1180, 720),
+  );
+  const list = desktop.library.getByRole("list");
+  await expect
+    .poll(() => list.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
+  const menu = await desktop.openContextMenu(desktop.row(desktop.library, sampleMods.weapons.name));
+
+  await list.dispatchEvent("scroll");
+  await expect(menu).toBeVisible();
+
+  const moved = await list.evaluate((element) => {
+    const previous = element.scrollTop;
+    element.scrollTop = previous === 0 ? element.scrollHeight : 0;
+    element.dispatchEvent(new Event("scroll"));
+    return element.scrollTop !== previous;
+  });
+  expect(moved).toBe(true);
+  await expect(menu).toHaveCount(0);
 });
 
 test("pending changes use outlined icon indicators instead of filled tags", async ({ desktop }) => {

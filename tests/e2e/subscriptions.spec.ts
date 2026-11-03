@@ -94,14 +94,16 @@ test("inactive context-menu Subscribe and Unsubscribe apply to the selected mods
   };
 
   await selectBoth(subscribeNames);
-  await desktop.row(desktop.inactive, subscribeNames[0]).click({ button: "right" });
+  const subscribeMenu = await desktop.openContextMenu(
+    desktop.row(desktop.inactive, subscribeNames[0]),
+  );
   await expect(
-    desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
+    subscribeMenu.getByRole("menuitem", { name: "Subscribe", exact: true }),
   ).toBeEnabled();
   await expect(
-    desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
+    subscribeMenu.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
   ).toBeDisabled();
-  await desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }).click();
+  await subscribeMenu.getByRole("menuitem", { name: "Subscribe", exact: true }).click();
   await expect(desktop.page.locator(".draft-bar")).toContainText("2 pending changes");
   for (const name of subscribeNames) {
     await expect(desktop.row(desktop.inactive, name)).toContainText("Pending subscribe");
@@ -113,11 +115,13 @@ test("inactive context-menu Subscribe and Unsubscribe apply to the selected mods
   // subscribed Workshop item has no readable About.xml until Steam finishes downloading it,
   // so RimLib correctly refuses to guess whether it is active.
   await selectBoth(unsubscribeNames);
-  await desktop.row(desktop.inactive, unsubscribeNames[0]).click({ button: "right" });
+  const unsubscribeMenu = await desktop.openContextMenu(
+    desktop.row(desktop.inactive, unsubscribeNames[0]),
+  );
   await expect(
-    desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
+    unsubscribeMenu.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
   ).toBeEnabled();
-  await desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }).click();
+  await unsubscribeMenu.getByRole("menuitem", { name: "Unsubscribe", exact: true }).click();
   await expect(desktop.page.locator(".draft-bar")).toContainText("2 pending changes");
   await desktop.applyDraft();
 
@@ -172,14 +176,10 @@ test("active mods expose no context subscription action and remain protected by 
   await expect(unsubscribe).toBeDisabled();
   await expect(unsubscribe).toHaveAttribute("title", "Deactivate this mod before unsubscribing");
 
-  await active.click({ button: "right" });
-  await expect(desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true })).toHaveCount(
-    0,
-  );
-  await expect(
-    desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
-  ).toHaveCount(0);
-  await expect(desktop.page.getByRole("menuitem", { name: "Remove", exact: true })).toBeDisabled();
+  const menu = await desktop.openContextMenu(active);
+  await expect(menu.getByRole("menuitem", { name: "Subscribe", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("menuitem", { name: "Unsubscribe", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("menuitem", { name: "Remove", exact: true })).toBeDisabled();
   await desktop.page.keyboard.press("Escape");
 
   const error = await desktop.page.evaluate(async (id) => {
@@ -241,27 +241,27 @@ test.describe("Offline Steam", () => {
     await unsubscribed.locator(".mod-row-main").click();
     const subscribe = desktop.info.getByRole("button", { name: "Subscribe", exact: true });
     await expect(subscribe).toBeEnabled();
-    await unsubscribed.click({ button: "right" });
+    const subscribeMenu = await desktop.openContextMenu(unsubscribed);
     await expect(
-      desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
+      subscribeMenu.getByRole("menuitem", { name: "Subscribe", exact: true }),
     ).toBeEnabled();
     await expect(
-      desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }),
+      subscribeMenu.getByRole("menuitem", { name: "Add tags", exact: true }),
     ).toBeEnabled();
     await desktop.page.keyboard.press("Escape");
-    await expect(desktop.page.getByRole("menu")).toHaveCount(0);
+    await expect(subscribeMenu).toHaveCount(0);
 
     const subscribed = desktop.row(desktop.inactive, sampleMods.spare.name);
     await subscribed.locator(".mod-row-main").click();
     await expect(
       desktop.info.getByRole("button", { name: "Unsubscribe", exact: true }),
     ).toBeEnabled();
-    await subscribed.click({ button: "right" });
+    const unsubscribeMenu = await desktop.openContextMenu(subscribed);
     await expect(
-      desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
+      unsubscribeMenu.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
     ).toBeEnabled();
     await desktop.page.keyboard.press("Escape");
-    await expect(desktop.page.getByRole("menu")).toHaveCount(0);
+    await expect(unsubscribeMenu).toHaveCount(0);
 
     await unsubscribed.locator(".mod-row-main").click();
     await subscribe.click();

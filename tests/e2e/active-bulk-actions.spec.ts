@@ -16,9 +16,9 @@ test("Add to Active stages every selected Library mod from its context menu", as
     .click({ modifiers: ["Shift"] });
   await expect(desktop.library.locator(".mod-row-main[aria-pressed=true]")).toHaveCount(2);
 
-  await desktop.row(desktop.library, selected[0].name).click({ button: "right" });
+  const menu = await desktop.openContextMenu(desktop.row(desktop.library, selected[0].name));
   await expect(desktop.page.getByText("2 mods selected", { exact: true })).toBeVisible();
-  await desktop.page.getByRole("menuitem", { name: "Add to Active", exact: true }).click();
+  await menu.getByRole("menuitem", { name: "Add to Active", exact: true }).click();
 
   for (const mod of selected) {
     const staged = desktop.row(desktop.active, mod.name);
@@ -52,9 +52,9 @@ test("Remove from Active stages every selected non-Core mod from its context men
     .click({ modifiers: ["Shift"] });
   await expect(desktop.active.locator(".mod-row-main[aria-pressed=true]")).toHaveCount(2);
 
-  await desktop.row(desktop.active, selected[0].name).click({ button: "right" });
+  const menu = await desktop.openContextMenu(desktop.row(desktop.active, selected[0].name));
   await expect(desktop.page.getByText("2 mods selected", { exact: true })).toBeVisible();
-  await desktop.page.getByRole("menuitem", { name: "Remove from Active", exact: true }).click();
+  await menu.getByRole("menuitem", { name: "Remove from Active", exact: true }).click();
 
   for (const mod of selected) {
     const staged = desktop.row(desktop.library, mod.name);
@@ -72,8 +72,8 @@ test("Remove from Active stages every selected non-Core mod from its context men
 });
 
 test("Remove from Active keeps RimWorld Core locked", async ({ desktop }) => {
-  await desktop.row(desktop.active, "Core").click({ button: "right" });
-  const remove = desktop.page.getByRole("menuitem", {
+  const menu = await desktop.openContextMenu(desktop.row(desktop.active, "Core"));
+  const remove = menu.getByRole("menuitem", {
     name: "Remove from Active",
     exact: true,
   });

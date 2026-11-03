@@ -30,8 +30,8 @@ test("Run RimWorld is available only when the current configuration has no pendi
   await expect(run).toBeVisible();
   await expect(run).toBeEnabled();
 
-  await desktop.row(desktop.active, sampleMods.active.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
+  const menu = await desktop.openContextMenu(desktop.row(desktop.active, sampleMods.active.name));
+  await menu.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
   const move = desktop.page.getByRole("dialog", { name: "Move active mod", exact: true });
   await move.getByLabel(/^Position/).fill("1");
   await move.getByRole("button", { name: "Stage move", exact: true }).click();
@@ -137,8 +137,8 @@ test("unapplied membership and load-order changes survive restart until Apply", 
   await expect(desktop.row(desktop.active, sampleMods.weapons.name)).toContainText(
     "Pending activation",
   );
-  await desktop.row(desktop.active, sampleMods.camera.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
+  const menu = await desktop.openContextMenu(desktop.row(desktop.active, sampleMods.camera.name));
+  await menu.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
   const move = desktop.page.getByRole("dialog", { name: "Move active mod", exact: true });
   await move.getByLabel(/^Position/).fill("1");
   await move.getByRole("button", { name: "Stage move", exact: true }).click();
@@ -406,8 +406,8 @@ test("deactivate plus unsubscribe writes config first and keeps the compound dra
   await desktop.row(desktop.active, sampleMods.harmony.name).locator(".mod-row-main").dblclick();
   const projected = desktop.row(desktop.inactive, sampleMods.harmony.name);
   await expect(projected).toContainText("Pending deactivation");
-  await projected.click({ button: "right" });
-  const unsubscribe = desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true });
+  const menu = await desktop.openContextMenu(projected);
+  const unsubscribe = menu.getByRole("menuitem", { name: "Unsubscribe", exact: true });
   await expect(unsubscribe).toBeEnabled();
   await unsubscribe.click();
   await expect(projected).toContainText("Pending unsubscribe");
@@ -583,8 +583,8 @@ test("dragging an Active mod stages its projected load order and discard restore
 test("a manual order draft survives deactivation and applies the combined projection", async ({
   desktop,
 }) => {
-  await desktop.row(desktop.active, sampleMods.camera.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
+  const menu = await desktop.openContextMenu(desktop.row(desktop.active, sampleMods.camera.name));
+  await menu.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
   const move = desktop.page.getByRole("dialog", { name: "Move active mod", exact: true });
   await move.getByLabel(/^Position/).fill("1");
   await move.getByRole("button", { name: "Stage move", exact: true }).click();
@@ -637,8 +637,8 @@ test("Move to position stages an Active order change and applies it only on conf
   const names = desktop.active.locator(".mod-row-copy strong");
   const positions = desktop.active.locator(".load-order-number");
 
-  await desktop.row(desktop.active, sampleMods.active.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
+  const menu = await desktop.openContextMenu(desktop.row(desktop.active, sampleMods.active.name));
+  await menu.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
   const move = desktop.page.getByRole("dialog", { name: "Move active mod", exact: true });
   await expect(move).toContainText(sampleMods.active.name);
   await expect(move.getByLabel(/^Position/)).toHaveValue("3");
@@ -691,8 +691,8 @@ test("manual order drafts stay separate while Auto-sort replaces only the earlie
   const names = desktop.active.locator(".mod-row-copy strong");
 
   async function stageMove(name: string, initialPosition: number, destination: number) {
-    await desktop.row(desktop.active, name).click({ button: "right" });
-    await desktop.page.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
+    const menu = await desktop.openContextMenu(desktop.row(desktop.active, name));
+    await menu.getByRole("menuitem", { name: "Move to position…", exact: true }).click();
     const move = desktop.page.getByRole("dialog", { name: "Move active mod", exact: true });
     await expect(move).toContainText(name);
     await expect(move.getByLabel(/^Position/)).toHaveValue(String(initialPosition));

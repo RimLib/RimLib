@@ -120,6 +120,14 @@ export class Desktop {
     return panel.getByRole("listitem").filter({ has: this.page.getByText(name, { exact: true }) });
   }
 
+  async openContextMenu(target: Locator): Promise<Locator> {
+    await target.scrollIntoViewIfNeeded();
+    await target.click({ button: "right" });
+    const menu = this.page.getByRole("menu", { name: "Selected mod actions", exact: true });
+    await expect(menu).toBeVisible();
+    return menu;
+  }
+
   async seed(scenario: Scenario): Promise<void> {
     await writeFile(join(this.root, harness.marker), this.token);
     for (const path of [

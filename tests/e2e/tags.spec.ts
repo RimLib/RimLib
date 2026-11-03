@@ -124,8 +124,10 @@ test("bulk tag dialogs preserve selection through create/cancel and remove from 
     .row(desktop.inactive, sampleMods.colonists.name)
     .locator(".mod-row-main")
     .click({ modifiers: ["Shift"] });
-  await desktop.row(desktop.inactive, sampleMods.weapons.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }).click();
+  const addMenu = await desktop.openContextMenu(
+    desktop.row(desktop.inactive, sampleMods.weapons.name),
+  );
+  await addMenu.getByRole("menuitem", { name: "Add tags", exact: true }).click();
   const bulk = desktop.page.getByRole("dialog", { name: "Add tags", exact: true });
   await bulk.getByRole("checkbox", { name: /Combat/ }).check();
   await bulk.getByRole("textbox", { name: "Search tags for selected mods" }).fill("New universe");
@@ -150,8 +152,10 @@ test("bulk tag dialogs preserve selection through create/cancel and remove from 
       .poll(async () => (await desktop.mod(id)).userTagIds)
       .toContain(sampleTags.combat.id);
   }
-  await desktop.row(desktop.inactive, sampleMods.weapons.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Remove tags", exact: true }).click();
+  const removeMenu = await desktop.openContextMenu(
+    desktop.row(desktop.inactive, sampleMods.weapons.name),
+  );
+  await removeMenu.getByRole("menuitem", { name: "Remove tags", exact: true }).click();
   const remove = desktop.page.getByRole("dialog", { name: "Remove tags", exact: true });
   await remove.getByRole("checkbox", { name: /Combat/ }).check();
   await remove.getByRole("button", { name: "Remove tags", exact: true }).click();

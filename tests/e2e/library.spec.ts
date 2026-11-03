@@ -247,8 +247,8 @@ test("selection removal uses confirmation, only removes selected library mods an
     .row(desktop.library, sampleMods.colonists.name)
     .locator(".mod-row-main")
     .click({ modifiers: ["Shift"] });
-  await desktop.row(desktop.library, sampleMods.weapons.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Remove", exact: true }).click();
+  const menu = await desktop.openContextMenu(desktop.row(desktop.library, sampleMods.weapons.name));
+  await menu.getByRole("menuitem", { name: "Remove", exact: true }).click();
   const dialog = await desktop.reviewDraft();
   await expect(dialog.getByRole("button", { name: "Apply 2 changes" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -320,8 +320,8 @@ test("removing an inactive subscribed mod stages unsubscribe and removal as one 
     }),
   ).toBeEnabled();
 
-  await row.click({ button: "right" });
-  const remove = desktop.page.getByRole("menuitem", {
+  const menu = await desktop.openContextMenu(row);
+  const remove = menu.getByRole("menuitem", {
     name: "Remove",
     exact: true,
   });
@@ -381,19 +381,19 @@ test("subscription actions live in inactive controls and bulk cleanup stays in t
   await expect(desktop.library.locator(".mod-row .tooltip-action")).toHaveCount(0);
   await desktop.row(desktop.library, sampleMods.weapons.name).locator(".mod-row-main").click();
   await expect(desktop.info.getByRole("button", { name: "Subscribe", exact: true })).toBeEnabled();
-  await desktop.row(desktop.library, sampleMods.weapons.name).click({ button: "right" });
-  await expect(
-    desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true }),
-  ).toBeEnabled();
+  const libraryMenu = await desktop.openContextMenu(
+    desktop.row(desktop.library, sampleMods.weapons.name),
+  );
+  await expect(libraryMenu.getByRole("menuitem", { name: "Subscribe", exact: true })).toBeEnabled();
   await desktop.page.keyboard.press("Escape");
 
-  await desktop.row(desktop.subscribed, sampleMods.harmony.name).click({ button: "right" });
-  await expect(desktop.page.getByRole("menuitem", { name: "Subscribe", exact: true })).toHaveCount(
+  const activeMenu = await desktop.openContextMenu(
+    desktop.row(desktop.subscribed, sampleMods.harmony.name),
+  );
+  await expect(activeMenu.getByRole("menuitem", { name: "Subscribe", exact: true })).toHaveCount(0);
+  await expect(activeMenu.getByRole("menuitem", { name: "Unsubscribe", exact: true })).toHaveCount(
     0,
   );
-  await expect(
-    desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
-  ).toHaveCount(0);
 });
 
 test("a subscribed record invalidates a pending selected removal without partial removal", async ({
@@ -404,8 +404,8 @@ test("a subscribed record invalidates a pending selected removal without partial
     .row(desktop.library, sampleMods.colonists.name)
     .locator(".mod-row-main")
     .click({ modifiers: ["Shift"] });
-  await desktop.row(desktop.library, sampleMods.weapons.name).click({ button: "right" });
-  await desktop.page.getByRole("menuitem", { name: "Remove", exact: true }).click();
+  const menu = await desktop.openContextMenu(desktop.row(desktop.library, sampleMods.weapons.name));
+  await menu.getByRole("menuitem", { name: "Remove", exact: true }).click();
   const dialog = await desktop.reviewDraft();
   await expect(dialog).toBeVisible();
   await desktop.page.evaluate(async (id) => {

@@ -56,8 +56,8 @@ export function sampleMod(
     downloadedAt: `2026-09-${String(28 - index).padStart(2, "0")}T12:00:00.000Z`,
     addedAt: "2026-08-01T12:00:00.000Z",
     gameVersions: ["1.5"],
-    thumbnail: "https://e2e.invalid/broken.png",
-    screenshots: ["https://e2e.invalid/broken.png"],
+    // Keep the shared workspace free from network timing; recovery.spec covers image failures.
+    screenshots: [],
     notes: `Personal notes for ${item.name}`,
   };
 }
