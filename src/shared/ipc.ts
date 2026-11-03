@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { subscriptionActions } from "./domainConstants";
+import { subscriptionActions, workshopSyncModes } from "./domainConstants";
 import { maxIpcTextLength, modListLimits } from "./limits";
 import { getOfficialContent } from "./officialContent";
 import { isUsablePackageId, normalizePackageId, rimWorldPackages } from "./packages";
@@ -123,7 +123,7 @@ const requestSchemas = {
     identifiersSchema,
     identifiersSchema,
   ]),
-  [ipcChannels.syncSubscribedMods]: noArgsSchema,
+  [ipcChannels.syncSubscribedMods]: z.tuple([z.enum(workshopSyncModes).optional()]),
   [ipcChannels.refreshSubscriptions]: noArgsSchema,
   [ipcChannels.inspectWorkshopStatus]: noArgsSchema,
   [ipcChannels.getSteamStatus]: noArgsSchema,

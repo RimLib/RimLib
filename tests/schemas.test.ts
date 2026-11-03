@@ -214,6 +214,31 @@ void test("subscription overrides reject prototype-like IDs", () => {
   );
 });
 
+void test("device-local Workshop metadata attempts validate and normalize exact numeric IDs", () => {
+  const input = storedVault({
+    deviceState: {
+      steam: {
+        observedIds: [],
+        metadataAttemptedIds: ["123", "123", "456"],
+        pending: {},
+      },
+    },
+  });
+  assert.strictEqual(parseStoredVault(input), input);
+  assert.deepEqual(normalizeVault(input).localSteamState.metadataAttemptedIds, ["123", "456"]);
+  for (const metadataAttemptedIds of [null, [123], [""], ["01"], ["not-an-id"]]) {
+    assert.throws(
+      () =>
+        parseStoredVault(
+          storedVault({
+            deviceState: { steam: { observedIds: [], metadataAttemptedIds, pending: {} } },
+          }),
+        ),
+      /Invalid/,
+    );
+  }
+});
+
 void test("device-local pending drafts validate, round-trip and clear explicitly", () => {
   const input = storedVault({
     deviceState: {

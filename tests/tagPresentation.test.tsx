@@ -244,7 +244,7 @@ void test("the header contains labeled icon commands and status messages without
     assert.match(html, /lucide-refresh-cw/);
     assert.doesNotMatch(html, /Library statistics|\d+ saved|\d+ subscribed|\d+ tags/);
     assert.match(html, /<span>Unsubscribe inactive<\/span>/);
-    assert.equal((html.match(/<button[^>]*disabled=""/g) ?? []).length, disabled ? 3 : 0);
+    assert.equal((html.match(/<button[^>]*disabled=""/g) ?? []).length, disabled ? 4 : 0);
     assert.ok(html.indexOf("Ready") < html.indexOf("Active-list changes"));
   }
 });

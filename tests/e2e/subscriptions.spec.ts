@@ -420,6 +420,50 @@ test("sync retains disappeared records and imports subscribed mods as inactive",
   expect(await desktop.calls("unsubscribe")).toEqual([]);
 });
 
+test("light Workshop refresh enriches only new mods and retains removed records", async ({
+  desktop,
+}) => {
+  await desktop.page.getByRole("button", { name: "Sync Workshop", exact: true }).click();
+  await expect(
+    desktop.page
+      .getByRole("status")
+      .filter({ hasText: "Workshop folders synchronized; saved mods retained" }),
+  ).toBeVisible();
+  const metadataCallsBefore = (await desktop.calls("metadata")).length;
+
+  await rm(join(desktop.workshop, sampleMods.other.id), { recursive: true });
+  const imported = {
+    ...(await desktop.mod(sampleMods.camera.id)),
+    id: "steam-302",
+    workshopId: "302",
+    name: "Light refresh import",
+    packageId: "example.light-refresh",
+    subscribed: true,
+  };
+  await desktop.install(imported);
+
+  await desktop.page.getByRole("button", { name: "Choose Workshop sync type" }).click();
+  const menu = desktop.page.getByRole("menu", { name: "Workshop sync type" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: /^Light refresh/ }).click();
+
+  await expect(
+    desktop.page.getByRole("status").filter({
+      hasText: "Workshop additions and removals refreshed; existing metadata retained",
+    }),
+  ).toBeVisible();
+  await expect(desktop.row(desktop.inactive, imported.name)).toBeVisible();
+  const metadataCalls = (await desktop.calls("metadata")).slice(metadataCallsBefore);
+  expect(metadataCalls).toHaveLength(1);
+  expect(metadataCalls[0]?.value).toContain("publishedfileids%5B0%5D=302");
+  expect(metadataCalls[0]?.value).not.toContain(`=${sampleMods.active.id}`);
+  expect((await desktop.mod("302")).thumbnail).toBe("https://e2e.invalid/previews/302.png");
+  expect((await desktop.mod(sampleMods.other.id)).subscribed).toBe(false);
+  expect((await desktop.mod(sampleMods.other.id)).notes).toBe(
+    `Personal notes for ${sampleMods.other.name}`,
+  );
+});
+
 test("IPC rejects malformed subscription mutations before they reach Steam", async ({
   desktop,
 }) => {

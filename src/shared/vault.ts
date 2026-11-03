@@ -47,6 +47,22 @@ export function effectiveSubscribedIds(state: LocalSteamState): Set<string> {
   return ids;
 }
 
+/**
+ * Combines the device-local attempt set with rows that clearly contain imported Workshop
+ * metadata. The row evidence supports legacy vaults and successful per-mod metadata refreshes;
+ * failed batch placeholders have neither signal and remain retryable.
+ */
+export function effectiveWorkshopMetadataAttemptedIds(
+  vault: Pick<ModVault, "localSteamState" | "mods">,
+): Set<string> {
+  return new Set([
+    ...(vault.localSteamState.metadataAttemptedIds ?? []),
+    ...vault.mods.flatMap((mod) =>
+      mod.workshopId && (mod.metadataUpdatedAt || mod.thumbnail) ? [mod.workshopId] : [],
+    ),
+  ]);
+}
+
 function sameStringSet(left: readonly string[], right: readonly string[]) {
   const leftValues = new Set(left);
   const rightValues = new Set(right);
@@ -169,6 +185,11 @@ function normalizeRuntimeVault(vault: ModVault): ModVault {
     localSteamState: {
       ...vault.localSteamState,
       observedIds: [...new Set(vault.localSteamState.observedIds)],
+      ...(vault.localSteamState.metadataAttemptedIds === undefined
+        ? {}
+        : {
+            metadataAttemptedIds: [...new Set(vault.localSteamState.metadataAttemptedIds)],
+          }),
       pending: { ...vault.localSteamState.pending },
     },
   };
@@ -269,6 +290,11 @@ export function serializeVault(vault: ModVault): StoredVault {
       steam: {
         ...vault.localSteamState,
         observedIds: [...new Set(vault.localSteamState.observedIds)],
+        ...(vault.localSteamState.metadataAttemptedIds === undefined
+          ? {}
+          : {
+              metadataAttemptedIds: [...new Set(vault.localSteamState.metadataAttemptedIds)],
+            }),
         pending: { ...vault.localSteamState.pending },
       },
       ...(pendingDraft === undefined ? {} : { pendingDraft }),
@@ -375,8 +401,24 @@ export function deleteLibraryModsExplicitly(vault: ModVault, modIds: string[]): 
       );
     }
   }
+  const deletedWorkshopIds = new Set(
+    [...ids].flatMap((id) => {
+      const workshopId = saved.get(id)?.workshopId;
+      return workshopId ? [workshopId] : [];
+    }),
+  );
   return {
     ...vault,
     mods: vault.mods.filter((mod) => !ids.has(mod.id)),
+    localSteamState: {
+      ...vault.localSteamState,
+      ...(vault.localSteamState.metadataAttemptedIds === undefined
+        ? {}
+        : {
+            metadataAttemptedIds: vault.localSteamState.metadataAttemptedIds.filter(
+              (id) => !deletedWorkshopIds.has(id),
+            ),
+          }),
+    },
   };
 }

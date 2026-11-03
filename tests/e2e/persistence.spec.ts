@@ -107,6 +107,7 @@ test("installed discoveries and filesystem update times are checkpointed across 
 
   await utimes(join(desktop.workshop, sampleMods.other.id), updatedAt, updatedAt);
   await desktop.install(discovered);
+  const metadataCallsBeforeDiscovery = (await desktop.calls("metadata")).length;
 
   await desktop.reopen();
   await expect
@@ -120,12 +121,27 @@ test("installed discoveries and filesystem update times are checkpointed across 
     )
     .toBe(discoveredAt.toISOString());
   await expect(desktop.library.locator(".mod-row-copy strong").first()).toHaveText(discovered.name);
+  await expect
+    .poll(
+      async () =>
+        (await desktop.vault()).mods.find((mod) => mod.workshopId === discovered.workshopId)
+          ?.thumbnail,
+    )
+    .toBe(`https://e2e.invalid/previews/${discovered.workshopId}.png`);
+  const discoveryMetadataCalls = (await desktop.calls("metadata")).slice(
+    metadataCallsBeforeDiscovery,
+  );
+  expect(discoveryMetadataCalls).toHaveLength(1);
+  expect(discoveryMetadataCalls[0]?.value).toContain(
+    `publishedfileids%5B0%5D=${discovered.workshopId}`,
+  );
 
   const firstCheckpoint = (await desktop.vault()).mods.find(
     (mod) => mod.workshopId === discovered.workshopId,
   );
   expect(firstCheckpoint?.addedAt).toBeTruthy();
 
+  const metadataCallsBeforeSecondOpen = (await desktop.calls("metadata")).length;
   await desktop.reopen();
   await expect
     .poll(async () => {
@@ -146,6 +162,7 @@ test("installed discoveries and filesystem update times are checkpointed across 
       updatedDownloadedAt: updatedAt.toISOString(),
     });
   await expect(desktop.library.locator(".mod-row-copy strong").first()).toHaveText(discovered.name);
+  expect(await desktop.calls("metadata")).toHaveLength(metadataCallsBeforeSecondOpen);
 });
 
 test("failed save prevents window close, preserves the database and permits retry", async ({

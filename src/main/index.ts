@@ -5,7 +5,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, screen, shell } from "el
 
 import rimLibAppIcon from "../../assets/rimlib-app-icon.png?asset";
 import { applicationName } from "../shared/application";
-import { hasConstantValue } from "../shared/domainConstants";
+import { hasConstantValue, workshopSyncModes } from "../shared/domainConstants";
 import {
   type IpcArgs,
   type IpcChannel,
@@ -24,6 +24,7 @@ import type {
   ModVault,
   SubscriptionAction,
   VaultSaveOptions,
+  WorkshopSyncMode,
 } from "../shared/types";
 import { isRecord } from "../shared/validation";
 import { configureApplicationIdentity } from "./applicationIdentity";
@@ -164,6 +165,9 @@ function requestSummary(channel: IpcChannel, args: unknown[]) {
       activeCount: Array.isArray(args[1]) ? args[1].length : undefined,
       expectedCount: Array.isArray(args[2]) ? args[2].length : undefined,
     };
+  }
+  if (channel === ipcChannels.syncSubscribedMods) {
+    return { mode: args[0] ?? workshopSyncModes.full };
   }
   if (
     channel === ipcChannels.chooseWorkshopModsPath ||
@@ -549,7 +553,9 @@ app
         return getActiveMods(settings);
       },
     );
-    handle(ipcChannels.syncSubscribedMods, () => steam.syncSubscribedMods());
+    handle(ipcChannels.syncSubscribedMods, (mode?: WorkshopSyncMode) =>
+      steam.syncSubscribedMods(mode),
+    );
     handle(ipcChannels.refreshSubscriptions, () => steam.refreshSubscriptions());
     handle(ipcChannels.inspectWorkshopStatus, () => steam.inspectWorkshopStatus());
     handle(ipcChannels.getSteamStatus, () => getSteamStatus());

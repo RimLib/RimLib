@@ -1,8 +1,10 @@
-import { CircleMinus, FileDown, FileUp, LoaderCircle, RefreshCw, Tags } from "lucide-react";
+import { CircleMinus, FileDown, FileUp, LoaderCircle, Tags } from "lucide-react";
 
 import { applicationName } from "../../../shared/application";
+import type { WorkshopSyncMode } from "../../../shared/types";
 import { tooltipPlacements } from "../utils/tooltips";
 import { TooltipIconButton } from "./common/TooltipIconButton";
+import { WorkshopSyncControl } from "./common/WorkshopSyncControl";
 
 const rimLibLogo = new URL("../../../../assets/rimlib-github-avatar.png", import.meta.url).href;
 
@@ -18,7 +20,7 @@ interface AppHeaderProps {
   exportDisabledReason?: string;
   onOpenSettings: () => void;
   onManageTags: () => void;
-  onSync: () => void;
+  onSync: (mode: WorkshopSyncMode) => void;
   onUnsubscribeInactive: () => void;
   onImportModList?: () => void;
   onExportModList?: () => void;
@@ -133,16 +135,7 @@ export function AppHeader({
           <Tags size={18} aria-hidden />
           <span>Manage Tags</span>
         </TooltipIconButton>
-        <TooltipIconButton
-          className="ghost-action px-3 text-[13px] whitespace-nowrap"
-          label="Sync Workshop"
-          placement={tooltipPlacements.bottom}
-          disabled={disabled}
-          onClick={onSync}
-        >
-          <RefreshCw size={18} aria-hidden />
-          <span>Sync Workshop</span>
-        </TooltipIconButton>
+        <WorkshopSyncControl disabled={disabled} onSync={onSync} />
         <TooltipIconButton
           className="danger-action px-3 text-[13px] whitespace-nowrap"
           aria-label="Unsubscribe all non-active mods"

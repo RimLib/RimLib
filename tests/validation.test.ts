@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { workshopSyncModes } from "../src/shared/domainConstants";
 import { type IpcChannel, ipcChannels, validateIpcArgs } from "../src/shared/ipc";
 import { errorCode, isRecord, requireValue } from "../src/shared/validation";
 import { normalizeVault } from "../src/shared/vault";
@@ -53,17 +54,30 @@ void test("unsupported database versions are refused without conversion", () => 
 void test("IPC channels are unique and no-argument requests reject injected arguments", () => {
   const channels = Object.values(ipcChannels);
   assert.equal(new Set(channels).size, channels.length);
-  for (const channel of [
-    "mod-store:load",
-    "steam:sync",
-    "steam:status",
-    "diagnostics:open-logs",
-  ] as const) {
+  for (const channel of ["mod-store:load", "steam:status", "diagnostics:open-logs"] as const) {
     assert.doesNotThrow(() => {
       validateIpcArgs(channel, []);
     });
     assert.throws(() => {
       validateIpcArgs(channel, ["injected"]);
+    }, /Invalid application request/);
+  }
+});
+
+void test("Workshop sync IPC accepts only the optional light and full refresh modes", () => {
+  for (const args of [[], [undefined], [workshopSyncModes.light], [workshopSyncModes.full]]) {
+    assert.doesNotThrow(() => {
+      validateIpcArgs(ipcChannels.syncSubscribedMods, args);
+    });
+  }
+  for (const args of [
+    ["quick"],
+    [null],
+    [workshopSyncModes.light, "injected"],
+    [undefined, "injected"],
+  ]) {
+    assert.throws(() => {
+      validateIpcArgs(ipcChannels.syncSubscribedMods, args);
     }, /Invalid application request/);
   }
 });

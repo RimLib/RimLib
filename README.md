@@ -241,13 +241,21 @@ panel membership comes from `ModsConfig.xml`, not folder or subscription state. 
 supplies installed metadata, while actual subscribe/unsubscribe actions use Steam's native
 subscription state. Confirmed in-app actions take precedence until the folders catch up.
 
-**Sync Workshop folders** saves detected presence first, imports installed metadata, refreshes
-available public details, and scans again to catch files that changed during a long sync. Local
-metadata comes from each mod's `About/About.xml`; a metadata-network failure does not prevent the
-local import. Partial metadata responses, invalid remote items and incomplete installed metadata
-finish as a visible **Sync completed with warnings** notification instead of a silent success.
-RimLib preserves existing fields where refreshes fail and records the affected Workshop IDs and
-causes in the structured application log.
+The **Sync Workshop** split button offers two modes. **Light refresh** checks for added and removed
+folders and requests public metadata only for newly discovered or previously unenriched mods.
+That targeted request supplies fields that are not stored in `About.xml`, including the Workshop
+thumbnail. **Full refresh** keeps the previous behavior: it refreshes public metadata for every
+installed Workshop mod. Both modes save detected presence first and scan again to catch files that
+changed during the operation.
+
+Local metadata comes from each mod's `About/About.xml`; the fast startup scan can therefore show a
+new mod briefly before its online thumbnail arrives. RimLib automatically follows that discovery
+with one targeted light metadata attempt for the new row. Completed attempts are remembered on the
+device, including private or deleted items, so later light refreshes do not repeatedly request them;
+use **Full refresh** for an explicit retry. A metadata-network failure does not prevent the local
+import. Partial metadata responses, invalid remote items and incomplete installed metadata finish
+as a visible warning instead of a silent success. RimLib preserves existing fields where refreshes
+fail and records the affected Workshop IDs and causes in the structured application log.
 
 ## Library and Active
 
@@ -299,9 +307,10 @@ Steam availability is checked once when that draft is applied.
 
 Installed metadata is cached by the effective Workshop/library location, and concurrent callers
 share one in-flight scan instead of rereading thousands of `About.xml` files. RimLib does not poll
-the active configuration or Workshop folders after initialization. Use **Sync Workshop folders**
-whenever you want to refresh them; synchronization also forces an installed-metadata scan so newly
-discovered files do not remain hidden behind an older cache.
+the active configuration or Workshop folders after initialization. Use **Light refresh** to pick up
+folder additions/removals and enrich only new mods, or **Full refresh** to re-fetch every mod's
+public metadata. Either choice also forces an installed-metadata scan so newly discovered files do
+not remain hidden behind an older cache.
 Once configuration is ready, activation and deactivation remain available even while details load.
 Auto-sort waits for the installed identity and ordering metadata needed to build a valid proposal.
 Unsubscribe, removal, and full inactive-cleanup controls do not use Steam, Workshop-folder, or

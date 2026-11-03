@@ -5,12 +5,14 @@ import type {
   steamStatusSources,
   subscriptionActions,
   subscriptionCommands,
+  workshopSyncModes,
 } from "./domainConstants";
 
 export type ModSource = ConstantValue<typeof modSources>;
 export type SteamStatusSource = ConstantValue<typeof steamStatusSources>;
 export type ModActivity = ConstantValue<typeof modActivities>;
 export type SubscriptionCommand = ConstantValue<typeof subscriptionCommands>;
+export type WorkshopSyncMode = ConstantValue<typeof workshopSyncModes>;
 
 export interface ModDependency {
   packageId: string;
@@ -92,6 +94,8 @@ export interface LocalSteamState {
   source?: SteamStatusSource;
   observedIds: string[];
   observedAt?: string;
+  /** Workshop IDs already targeted by metadata enrichment on this device. */
+  metadataAttemptedIds?: string[];
   // Confirmed Steam actions take precedence until the installed folders catch up.
   pending: Record<string, SubscriptionCommand>;
 }
@@ -185,6 +189,8 @@ export interface SteamImportResult {
   mods: Mod[];
   discoveredIds: string[];
   manifestPaths: string[];
+  /** IDs targeted by this metadata import, including unavailable/private responses. */
+  metadataAttemptedIds?: string[];
   missingMetadataIds: string[];
   steamLibraryPaths: string[];
   subscribedIds: string[];
@@ -292,7 +298,7 @@ export interface ModStoreApi {
   validateWorkshopModsPath: (path: string) => Promise<string>;
   deleteLibraryMods: (modIds: string[]) => Promise<ModVault>;
   refreshModMetadata: (modId: string) => Promise<ModVault>;
-  syncSubscribedMods: () => Promise<SteamOperationResult>;
+  syncSubscribedMods: (mode?: WorkshopSyncMode) => Promise<SteamOperationResult>;
   refreshSubscriptions: () => Promise<SteamOperationResult>;
   inspectWorkshopStatus: () => Promise<WorkshopStatusSnapshot>;
   getSteamStatus: () => Promise<SteamStatus>;

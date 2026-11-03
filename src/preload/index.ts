@@ -41,7 +41,7 @@ const modStore: ModStoreApi = {
   getActiveMods: (settings) => invoke(ipcChannels.getActiveMods, settings),
   setActiveMods: (settings, packageIds, expectedPackageIds) =>
     invoke(ipcChannels.setActiveMods, settings, packageIds, expectedPackageIds),
-  syncSubscribedMods: () => invoke(ipcChannels.syncSubscribedMods),
+  syncSubscribedMods: (mode) => invoke(ipcChannels.syncSubscribedMods, mode),
   refreshSubscriptions: () => invoke(ipcChannels.refreshSubscriptions),
   inspectWorkshopStatus: () => invoke(ipcChannels.inspectWorkshopStatus),
   getSteamStatus: () => invoke(ipcChannels.getSteamStatus),

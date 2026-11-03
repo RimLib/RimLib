@@ -154,6 +154,29 @@ void test("omitting entries on save never deletes mods; deletion is explicit", (
   assert.equal(deleted.mods.length, 1);
 });
 
+void test("explicit deletion forgets the removed mod's metadata attempt so reinstall can enrich it", () => {
+  const original: ModVault = {
+    ...vault(),
+    mods: vault().mods.map((entry) =>
+      entry.workshopId === "1" ? { ...entry, subscribed: false } : entry,
+    ),
+    localSteamState: {
+      observedIds: ["2"],
+      pending: {},
+      metadataAttemptedIds: ["1", "2", "999"],
+    },
+  };
+
+  const deleted = deleteLibraryModsExplicitly(original, ["steam-1"]);
+
+  assert.deepEqual(
+    deleted.mods.map((entry) => entry.workshopId),
+    ["2"],
+  );
+  assert.deepEqual(deleted.localSteamState.metadataAttemptedIds, ["2", "999"]);
+  assert.deepEqual(original.localSteamState.metadataAttemptedIds, ["1", "2", "999"]);
+});
+
 void test("normalization keeps unknown fields and rejects unsupported schemas and invalid records", () => {
   const result = normalizeVault({
     ...vault(),

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { modSources, steamStatusSources, subscriptionCommands } from "./domainConstants";
 import { maxIpcTextLength, modListLimits } from "./limits";
 import { isUsablePackageId, normalizePackageId } from "./packages";
+import { isSteamWorkshopId } from "./steam";
 import type {
   appSettingKeys,
   AppSettings,
@@ -98,6 +99,9 @@ const tagSchema = z.looseObject({
 const storedWorkshopIdSchema = z
   .string()
   .regex(/^\d+$/, { error: "Invalid Steam subscription snapshot" });
+const attemptedWorkshopIdSchema = z
+  .string()
+  .refine(isSteamWorkshopId, { error: "Invalid Workshop metadata attempt" });
 const pendingSubscriptionsSchema = z.custom<Record<string, "subscribe" | "unsubscribe">>(
   (value) =>
     isRecord(value) &&
@@ -341,6 +345,7 @@ const storedVaultSchema = z.looseObject({
       source: z.enum(steamStatusSources, { error: "Invalid Steam status source" }).optional(),
       observedIds: z.array(storedWorkshopIdSchema),
       observedAt: z.string().optional(),
+      metadataAttemptedIds: z.array(attemptedWorkshopIdSchema).optional(),
       pending: pendingSubscriptionsSchema,
     }),
     pendingDraft: pendingDraftSchema.optional(),

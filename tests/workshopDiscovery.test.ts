@@ -626,6 +626,39 @@ void test("optional web metadata failures do not prevent import of local names, 
     assert.match(requireValue(imported.warnings[0]), /Offline/);
   }));
 
+void test("metadata import records only batches completed before a later request failure", async () => {
+  const ids = Array.from({ length: 201 }, (_, index) => String(index + 1));
+  const batches: string[][] = [];
+  const imported = await importInstalledSteamMods(
+    {
+      ...snapshot([]),
+      folders: ids.map((workshopId) => ({ workshopId, path: `missing-${workshopId}` })),
+    },
+    undefined,
+    async (_input, init) => {
+      assert.ok(init?.body instanceof URLSearchParams);
+      const requested = [...init.body.entries()]
+        .filter(([key]) => key.startsWith("publishedfileids["))
+        .map(([, id]) => id);
+      batches.push(requested);
+      if (batches.length === 2) {
+        throw new Error("Later metadata batch failed");
+      }
+      return Response.json({ response: { publishedfiledetails: [] } });
+    },
+  );
+
+  assert.deepEqual(
+    batches.map((batch) => batch.length),
+    [100, 100],
+  );
+  assert.deepEqual(imported.subscribedIds, ids);
+  const attemptedIds = requireValue(imported.metadataAttemptedIds);
+  assert.deepEqual(attemptedIds, ids.slice(0, 100));
+  assert.ok(!attemptedIds.includes("101"));
+  assert.ok(!attemptedIds.includes("201"));
+});
+
 void test("missing remote details and installed package identities return actionable warnings and WARN logs", async () =>
   temporary(async (directory) => {
     for (const [id, about] of [

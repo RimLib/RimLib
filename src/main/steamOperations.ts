@@ -5,6 +5,7 @@ import {
   steamStatusSources,
   subscriptionActions,
   subscriptionCommands,
+  workshopSyncModes,
 } from "../shared/domainConstants";
 import { steamLimits } from "../shared/limits";
 import {
@@ -23,9 +24,15 @@ import type {
   SubscriptionAction,
   SubscriptionCheck,
   WorkshopStatusSnapshot,
+  WorkshopSyncMode,
 } from "../shared/types";
 import { requireValue } from "../shared/validation";
-import { effectiveSubscribedIds, mergeSteamSync, reconcileLocalSteamState } from "../shared/vault";
+import {
+  effectiveSubscribedIds,
+  effectiveWorkshopMetadataAttemptedIds,
+  mergeSteamSync,
+  reconcileLocalSteamState,
+} from "../shared/vault";
 import { getActiveModsView } from "./installedMods";
 import { log } from "./logging";
 import { assertGameClosed, type getActiveMods } from "./rimWorldConfig";
@@ -211,7 +218,7 @@ export class SteamOperations {
     this.operationState = { ...state, reconciliationFinished: true };
   }
 
-  private async sync(): Promise<{
+  private async sync(mode: WorkshopSyncMode): Promise<{
     vault: ModVault;
     warnings: string[];
     folderWarnings: string[];
@@ -222,27 +229,72 @@ export class SteamOperations {
     );
     await this.store.checkpoint("steam-sync");
     const status = await this.recordDiscovery(discovery);
+    const savedIds = new Set(
+      status.mods.flatMap((mod) => (mod.workshopId ? [mod.workshopId] : [])),
+    );
+    const metadataAttemptedIds = effectiveWorkshopMetadataAttemptedIds(status);
+    const metadataDiscovery =
+      mode === workshopSyncModes.light
+        ? {
+            ...discovery,
+            folders: discovery.folders.filter(
+              ({ workshopId }) =>
+                !savedIds.has(workshopId) || !metadataAttemptedIds.has(workshopId),
+            ),
+          }
+        : discovery;
     this.progress({
-      message: "Workshop folders scanned; refreshing metadata...",
+      message:
+        mode === workshopSyncModes.light
+          ? metadataDiscovery.folders.length
+            ? "Workshop folders scanned; refreshing new mod metadata..."
+            : "Workshop folders scanned; no new metadata to refresh..."
+          : "Workshop folders scanned; refreshing metadata...",
       completed: 0,
       total: 1,
       vault: status,
     });
-    const imported = await this.dependencies.importMods(discovery, this.progress);
+    const imported =
+      mode === workshopSyncModes.full || metadataDiscovery.folders.length
+        ? await this.dependencies.importMods(metadataDiscovery, this.progress)
+        : {
+            mods: [],
+            subscribedIds: [],
+            discoveredIds: [],
+            manifestPaths: discovery.manifestPaths,
+            missingMetadataIds: [],
+            steamLibraryPaths: discovery.steamLibraryPaths,
+            warnings: [...new Set(discovery.warnings)],
+          };
     const latest = await this.dependencies.discover(undefined, (await this.store.load()).settings);
     const vault = await this.store.update((current) => {
       const { observedIds, pending, effectiveIds } = workshopFolderStatus(current, latest);
+      // Infer attempts from legacy rows only before merging this import. A failed remote batch still
+      // produces useful local About.xml rows, but those rows must remain eligible for a later light
+      // retry instead of being mistaken for completed metadata requests by their Steam tag.
+      const nextMetadataAttemptedIds = effectiveWorkshopMetadataAttemptedIds(current);
+      const merged = mergeSteamSync(current, { ...imported, subscribedIds: effectiveIds });
+      imported.metadataAttemptedIds?.forEach((id) => nextMetadataAttemptedIds.add(id));
       return {
-        ...mergeSteamSync(current, { ...imported, subscribedIds: effectiveIds }),
+        ...merged,
         localSteamState: {
+          ...merged.localSteamState,
           source: steamStatusSources.workshopFolders,
           observedIds,
           observedAt: new Date().toISOString(),
+          metadataAttemptedIds: [...nextMetadataAttemptedIds],
           pending,
         },
       };
     });
-    this.progress({ message: "Workshop folders synchronized", completed: 1, total: 1 });
+    this.progress({
+      message:
+        mode === workshopSyncModes.light
+          ? "Workshop folder changes refreshed"
+          : "Workshop folders synchronized",
+      completed: 1,
+      total: 1,
+    });
     const folderWarnings = [...new Set([...discovery.warnings, ...latest.warnings])];
     const warnings = [...new Set([...folderWarnings, ...imported.warnings])];
     const discoveryWarnings = new Set(folderWarnings);
@@ -291,9 +343,14 @@ export class SteamOperations {
     };
   }
 
-  syncSubscribedMods(): Promise<SteamOperationResult> {
+  syncSubscribedMods(
+    mode: WorkshopSyncMode = workshopSyncModes.full,
+  ): Promise<SteamOperationResult> {
+    if (!hasConstantValue(workshopSyncModes, mode)) {
+      return Promise.reject(new Error("Invalid Workshop refresh mode."));
+    }
     return this.exclusiveLocal(async () => {
-      const { vault, warnings, folderWarnings } = await this.sync();
+      const { vault, warnings, folderWarnings } = await this.sync(mode);
       return this.result(vault, 0, 0, [], warnings, folderWarnings);
     });
   }

@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { steamStatusSources } from "../../shared/domainConstants";
-import {
-  isOfficialMod,
-  isUsablePackageId,
-  normalizePackageId,
-  rimWorldPackages,
-} from "../../shared/packages";
+import { isUsablePackageId, normalizePackageId, rimWorldPackages } from "../../shared/packages";
 import { isWorkshopMod } from "../../shared/subscriptions";
-import type { ImportedModList, Mod, ModVault } from "../../shared/types";
+import type { Mod, ModVault } from "../../shared/types";
 import { requireValue } from "../../shared/validation";
 import { AppHeader } from "./components/AppHeader";
 import { AppTopBar } from "./components/AppTopBar";
@@ -27,8 +22,12 @@ import { ModsPanel } from "./components/panels/ModsPanel";
 import { SubscribedModsPanel } from "./components/panels/SubscribedModsPanel";
 import { useActionNotifications } from "./hooks/useActionNotifications";
 import { useActiveMods } from "./hooks/useActiveMods";
+import { useAutomaticWorkshopMetadata } from "./hooks/useAutomaticWorkshopMetadata";
 import { useDraftChanges } from "./hooks/useDraftChanges";
 import { useFirebaseSync } from "./hooks/useFirebaseSync";
+import { useInitialModSelection } from "./hooks/useInitialModSelection";
+import { useInstalledModPersistence } from "./hooks/useInstalledModPersistence";
+import { useModListTransfer } from "./hooks/useModListTransfer";
 import { useModSelection } from "./hooks/useModSelection";
 import { useModVault } from "./hooks/useModVault";
 import { useSettingsDialog } from "./hooks/useSettingsDialog";
@@ -36,31 +35,28 @@ import { useSteamAvailability } from "./hooks/useSteamAvailability";
 import { useTagDialogs } from "./hooks/useTagDialogs";
 import { useWorkshopActions } from "./hooks/useWorkshopActions";
 import { useWorkshopStatus } from "./hooks/useWorkshopStatus";
+import { useWorkspaceProjection } from "./hooks/useWorkspaceProjection";
 import { getStore } from "./services/modStore";
 import {
   useDraftStore,
   useWorkspaceStore,
   WorkspaceStoreProvider,
 } from "./stores/WorkspaceStoreProvider";
-import { buildModViews } from "./utils/activeMods";
 import {
   deriveActiveOrderMoves,
   moveActiveModRelative,
   moveActiveModsToPosition,
 } from "./utils/activeOrder";
-import { validateActiveMods } from "./utils/activeValidation";
 import {
   type AutoSortDependencyPlan,
   autoSortDependencyPlanKey,
   buildAutoSortDependencyPlan,
-  canStageAutoSortDependency,
 } from "./utils/autoSortDependencies";
 import { resolveDependencyTargets } from "./utils/dependencies";
 import { hasStagedDependencyActivations } from "./utils/draftNotices";
 import {
   activeOrderDraftKinds,
   type ActiveOrderDraftOperationInput,
-  deriveDraftActivityDelta,
   type DraftAction,
   draftActions,
   draftActiveOrderTemplate,
@@ -69,9 +65,7 @@ import {
   projectActivityPanels,
   stageActivationChanges,
 } from "./utils/drafts";
-import { reconcileInstalledModMetadata } from "./utils/installedModPersistence";
 import {
-  activityPanels,
   filterLibrary,
   filterModsByTag,
   matchesModTagFilter,
@@ -79,23 +73,10 @@ import {
   promoteModsToFront,
   resolveModPriorityId,
 } from "./utils/library";
-import { buildModListExportPackageIds } from "./utils/modListExport";
-import {
-  buildModListImportPlan,
-  modListImportBaselineError,
-  type ModListImportPlan,
-  modListImportPlanKey,
-} from "./utils/modListImport";
 import { modTagTargets } from "./utils/modSelection";
 import { sortActiveMods } from "./utils/modSort";
 import { tagDialogActions, tagDialogKinds } from "./utils/tagDialogs";
-import {
-  modFilters,
-  type ModPanelMode,
-  modPanelModes,
-  modSorts,
-  modTagFilters,
-} from "./utils/uiConstants";
+import { modFilters, modPanelModes, modSorts, modTagFilters } from "./utils/uiConstants";
 
 function withPendingDraft(vault: ModVault, pendingDraft: ModVault["pendingDraft"]): ModVault {
   if (JSON.stringify(vault.pendingDraft) === JSON.stringify(pendingDraft)) {
@@ -157,15 +138,7 @@ function Workspace() {
     refresh: refreshActive,
     adoptActive,
   } = useActiveMods(settings, loaded);
-  useEffect(() => {
-    if (!loaded || busy || active.installedMods === undefined) {
-      return;
-    }
-    const observedAt = new Date().toISOString();
-    update((previous) =>
-      reconcileInstalledModMetadata(previous, active.installedMods ?? [], observedAt),
-    );
-  }, [active.installedMods, busy, loaded, update]);
+  useInstalledModPersistence({ busy, installedMods: active.installedMods, loaded, update });
   const libraryView = useWorkspaceStore((state) => state.views.unsubscribed);
   const {
     search,
@@ -217,15 +190,10 @@ function Workspace() {
     modName: string;
     initialPosition: number;
   }>();
-  const [modListImportPlan, setModListImportPlan] = useState<ModListImportPlan>();
   const [libraryPromotion, setLibraryPromotion] = useState<{
     view: typeof libraryView;
     mods: readonly Pick<Mod, "id" | "packageId">[];
   }>();
-  const initialSelectionSettled = useRef(false);
-  const initialSelectionTarget = useRef<
-    { id: string; packageId?: string; panel: ModPanelMode } | undefined
-  >(undefined);
   const folderRequest = useRef(false);
   const tagDialogs = useTagDialogs({ busy, update, deleteTag, perform, setNotice });
   const { assign: assignTags } = tagDialogs;
@@ -251,19 +219,6 @@ function Workspace() {
     firebaseSync,
   });
 
-  // About.xml metadata corrects stale saved identities and also exposes disabled local mods/DLC.
-  const modViews = useMemo(() => buildModViews(active, mods), [active, mods]);
-  const displayMods = modViews.allEntries;
-  const savedIds = useMemo(() => new Set(mods.map((mod) => mod.id)), [mods]);
-  const actualPanels = useMemo(
-    () =>
-      activityPanels(
-        { localSteamState: vault.localSteamState },
-        displayMods,
-        modViews.activeEntries,
-      ),
-    [vault.localSteamState, displayMods, modViews.activeEntries],
-  );
   const draft = useDraftChanges({
     run,
     adopt,
@@ -274,10 +229,29 @@ function Workspace() {
     setNotice,
     settings,
   });
-  const actualMods = useMemo(
-    () => [...actualPanels.inactive, ...actualPanels.active],
-    [actualPanels],
-  );
+  // About.xml metadata, saved records and the pending draft are projected in one read-only model.
+  const {
+    displayMods,
+    savedIds,
+    actualPanels,
+    actualMods,
+    draftActionsById,
+    draftActivityDelta,
+    membershipPanels,
+    panels,
+    restoreTargets,
+    inactiveCountByTagId,
+    autoSortDependencyCandidates,
+    activeValidation,
+    actualById,
+  } = useWorkspaceProjection({
+    active,
+    mods,
+    tags,
+    localSteamState: vault.localSteamState,
+    draft,
+  });
+  const missingDependenciesById = activeValidation.missingDependenciesById;
   useEffect(() => {
     if (!loaded || draftPersistenceStatus.current !== "waiting") {
       return;
@@ -312,93 +286,6 @@ function Workspace() {
     draftPersistenceActions,
     update,
   ]);
-  const draftActionsById = useMemo(() => {
-    const result = new Map<string, DraftAction[]>();
-    for (const change of draft.changes) {
-      result.set(change.mod.id, [...(result.get(change.mod.id) ?? []), change.action]);
-    }
-    return result;
-  }, [draft.changes]);
-  const draftActivityDelta = useMemo(
-    () => deriveDraftActivityDelta(draft.changes),
-    [draft.changes],
-  );
-  const membershipPanels = useMemo(
-    () => projectActivityPanels(actualPanels.inactive, actualPanels.active, draft.changes),
-    [actualPanels, draft.changes],
-  );
-  const projectedActiveOrder = useMemo(
-    () =>
-      draft.activeOrder ??
-      draftActiveOrderTemplate(draft.activeBasePackageIds ?? active.packageIds, draft.changes),
-    [active.packageIds, draft.activeBasePackageIds, draft.activeOrder, draft.changes],
-  );
-  const panels = useMemo(
-    () =>
-      projectActivityPanels(
-        actualPanels.inactive,
-        actualPanels.active,
-        draft.changes,
-        projectedActiveOrder,
-      ),
-    [actualPanels, draft.changes, projectedActiveOrder],
-  );
-  const restoreTargets = useMemo(
-    () => panels.active.filter((mod) => !isOfficialMod(mod)),
-    [panels.active],
-  );
-  const inactiveCountByTagId = useMemo(
-    () =>
-      new Map(
-        tags.map((tag) => [
-          tag.id,
-          panels.inactive.filter((mod) => mod.userTagIds?.includes(tag.id)).length,
-        ]),
-      ),
-    [panels.inactive, tags],
-  );
-  const autoSortDependencyCandidates = useMemo(
-    () => membershipPanels.inactive.filter((mod) => canStageAutoSortDependency(mod, savedIds)),
-    [membershipPanels.inactive, savedIds],
-  );
-  const activeValidation = useMemo(
-    () => validateActiveMods(panels.active, active.gameVersion),
-    [panels.active, active.gameVersion],
-  );
-  const missingDependenciesById = activeValidation.missingDependenciesById;
-  const actualById = useMemo(
-    () => new Map([...actualPanels.inactive, ...actualPanels.active].map((mod) => [mod.id, mod])),
-    [actualPanels],
-  );
-  const workshopStatus = useWorkshopStatus(
-    loaded,
-    Boolean(
-      busy ||
-      draft.reviewOpen ||
-      draft.changes.length ||
-      draft.activeOrder ||
-      settingsDialog.isOpen ||
-      tagDialogs.dialog.kind !== tagDialogKinds.closed ||
-      contextMenu ||
-      autoSortDependencyPlan ||
-      moveActiveRequest ||
-      modListImportPlan,
-    ),
-    settings.workshopModsPath,
-    update,
-  );
-  const workshop = useWorkshopActions({
-    run,
-    adopt,
-    adoptActive,
-    refreshActive,
-    perform,
-    notifyError,
-    notifyWarning,
-    onWorkshopStatus: workshopStatus.record,
-    setNotice,
-  });
-  const { progress } = workshop;
   // Steam availability is deliberately checked only when the draft is confirmed. Keeping the
   // staging controls independent from the current client state lets users prepare a complete
   // draft while Steam is closed without weakening the apply-time safety check.
@@ -415,52 +302,71 @@ function Workspace() {
       : active.installedMods === undefined
         ? "Installed mod details are unavailable. Use Sync Workshop to retry."
         : undefined);
-  const activeMetadataVerified =
-    activeMetadataUnavailable === undefined && active.installedMods !== undefined;
-  const modListActualPanels = useMemo(() => {
-    if (activeMetadataVerified) {
-      return actualPanels;
-    }
-    const planningViews = buildModViews({ ...active, installedMods: undefined }, mods);
-    return activityPanels(
-      { localSteamState: vault.localSteamState },
-      planningViews.allEntries,
-      planningViews.activeEntries,
-    );
-  }, [active, activeMetadataVerified, actualPanels, mods, vault.localSteamState]);
-  const modListActualMods = useMemo(
-    () => [...modListActualPanels.inactive, ...modListActualPanels.active],
-    [modListActualPanels],
+  const modLists = useModListTransfer({
+    active,
+    activeConfigurationError,
+    activeMetadataVerified:
+      activeMetadataUnavailable === undefined && active.installedMods !== undefined,
+    actualPanels,
+    busy,
+    draft,
+    draftControlsDisabledReason,
+    localSteamState: vault.localSteamState,
+    mods,
+    notifyWarning,
+    perform,
+    projectedActiveMods: panels.active,
+    run,
+    savedIds,
+    settings,
+    setNotice,
+    workspaceActions,
+  });
+  const workshopRefreshPaused = Boolean(
+    busy ||
+    draft.reviewOpen ||
+    draft.changes.length ||
+    draft.activeOrder ||
+    settingsDialog.isOpen ||
+    tagDialogs.dialog.kind !== tagDialogKinds.closed ||
+    contextMenu ||
+    autoSortDependencyPlan ||
+    moveActiveRequest ||
+    modLists.plan,
   );
+  const workshopStatus = useWorkshopStatus(
+    loaded,
+    workshopRefreshPaused,
+    settings.workshopModsPath,
+    update,
+  );
+  const workshop = useWorkshopActions({
+    run,
+    adopt,
+    adoptActive,
+    refreshActive,
+    perform,
+    notifyError,
+    notifyWarning,
+    onWorkshopStatus: workshopStatus.record,
+    setNotice,
+  });
+  const { progress } = workshop;
+  useAutomaticWorkshopMetadata({
+    desktopAvailable: Boolean(window.modStore),
+    draftReady: draftHydrated,
+    installedMods: active.installedMods,
+    loaded,
+    paused: workshopRefreshPaused,
+    sync: workshop.sync,
+    vault,
+  });
   const activeSafetyError = activeConfigurationError ?? activeMetadataUnavailable;
   const restoreDisabledReason =
     draftControlsDisabledReason ??
     activeConfigurationError ??
     (!restoreTargets.length ? "Only RimWorld and DLC are active" : undefined);
   const addTagToActiveDisabledReason = draftControlsDisabledReason ?? activeConfigurationError;
-  const importBaselineError = modListImportBaselineError(active.packageIds);
-  const retainedActiveConfiguration = Boolean(
-    active.error &&
-    active.packageIds.length > 0 &&
-    active.gameVersion?.trim() &&
-    !importBaselineError,
-  );
-  const modListConfigurationError = retainedActiveConfiguration
-    ? undefined
-    : activeConfigurationError;
-  const importModListDisabledReason =
-    draftControlsDisabledReason ??
-    modListConfigurationError ??
-    importBaselineError ??
-    (draft.changes.length || draft.activeOrderOperations.length
-      ? "Apply or discard the pending draft before importing a mod list"
-      : undefined);
-  const exportModListDisabledReason =
-    draftControlsDisabledReason ??
-    modListConfigurationError ??
-    (!active.gameVersion?.trim()
-      ? "RimWorld's version could not be read from ModsConfig.xml"
-      : undefined);
   const inactiveSubscribedModIds = useMemo(
     () =>
       panels.inactive
@@ -586,84 +492,17 @@ function Workspace() {
       setLibraryPromotion(remaining.length ? { ...libraryPromotion, mods: remaining } : undefined);
     }
   }, [actualMods, draft.changes, libraryPromotion, libraryView, panels.inactive]);
-  useEffect(() => {
-    if (initialSelectionSettled.current || !loaded || activeLoading) {
-      return;
-    }
-    const automaticTarget = initialSelectionTarget.current;
-    if (automaticTarget) {
-      if (focusedModId && focusedModId !== automaticTarget.id) {
-        initialSelectionSettled.current = true;
-        initialSelectionTarget.current = undefined;
-        return;
-      }
-      const candidates =
-        automaticTarget.panel === modPanelModes.active ? panels.active : panels.inactive;
-      const targetStillExists = candidates.some((mod) => mod.id === automaticTarget.id);
-      if (!targetStillExists) {
-        const replacement =
-          candidates.find(
-            (mod) =>
-              automaticTarget.packageId &&
-              mod.packageId &&
-              normalizePackageId(mod.packageId) === automaticTarget.packageId,
-          ) ?? candidates[0];
-        if (replacement) {
-          workspaceActions.select(
-            automaticTarget.panel,
-            candidates.map((mod) => mod.id),
-            replacement.id,
-          );
-          initialSelectionTarget.current = {
-            id: replacement.id,
-            packageId: replacement.packageId
-              ? normalizePackageId(replacement.packageId)
-              : undefined,
-            panel: automaticTarget.panel,
-          };
-        }
-      }
-      if (!activeMetadataLoading) {
-        initialSelectionSettled.current = true;
-        initialSelectionTarget.current = undefined;
-      }
-      return;
-    }
-    if (focusedModId || selection.ids.length) {
-      initialSelectionSettled.current = true;
-      return;
-    }
-    const activeTarget = panels.active[0];
-    const target = activeTarget ?? (active.error ? undefined : panels.inactive[0]);
-    if (!target) {
-      if (!active.error && !activeMetadataLoading) {
-        initialSelectionSettled.current = true;
-      }
-      return;
-    }
-    const mode = activeTarget ? modPanelModes.active : modPanelModes.inactive;
-    const orderedIds = (activeTarget ? panels.active : panels.inactive).map((mod) => mod.id);
-    workspaceActions.select(mode, orderedIds, target.id);
-    initialSelectionTarget.current = {
-      id: target.id,
-      packageId: target.packageId ? normalizePackageId(target.packageId) : undefined,
-      panel: mode,
-    };
-    if (!activeMetadataLoading) {
-      initialSelectionSettled.current = true;
-      initialSelectionTarget.current = undefined;
-    }
-  }, [
-    active.error,
+  useInitialModSelection({
+    activeError: active.error,
     activeLoading,
     activeMetadataLoading,
+    activeMods: panels.active,
     focusedModId,
+    inactiveMods: panels.inactive,
     loaded,
-    panels.active,
-    panels.inactive,
-    selection.ids.length,
-    workspaceActions,
-  ]);
+    select: workspaceActions.select,
+    selectedCount: selection.ids.length,
+  });
   const projectedInactiveById = useMemo(
     () => new Map(panels.inactive.map((mod) => [mod.id, mod])),
     [panels.inactive],
@@ -1225,122 +1064,6 @@ function Workspace() {
     await perform(() => getStore().openWorkshopInBrowser(id));
   }
 
-  function importModList() {
-    void perform(async () => {
-      if (importModListDisabledReason) {
-        return;
-      }
-      const imported: ImportedModList | null = await run(() => getStore().importModList());
-      if (!imported) {
-        return;
-      }
-      const plan = buildModListImportPlan(
-        imported,
-        modListActualMods,
-        modListActualPanels.active,
-        active.gameVersion,
-        savedIds,
-      );
-      setModListImportPlan(plan);
-      setNotice(`Loaded ${imported.fileName}; review the imported Active list`);
-    });
-  }
-
-  function confirmModListImport() {
-    void perform(() => {
-      const openedPlan = requireValue(
-        modListImportPlan,
-        "The imported mod-list preview is no longer open.",
-      );
-      if (busy || draft.applying) {
-        return;
-      }
-      if (importModListDisabledReason) {
-        throw new Error(importModListDisabledReason);
-      }
-      // Re-resolve against the current inventory so a background metadata refresh cannot turn the
-      // preview into a stale or partial draft. The draft store performs the final baseline check.
-      const plan = buildModListImportPlan(
-        openedPlan.file,
-        modListActualMods,
-        modListActualPanels.active,
-        active.gameVersion,
-        savedIds,
-      );
-      if (modListImportPlanKey(plan) !== modListImportPlanKey(openedPlan)) {
-        setModListImportPlan(plan);
-        throw new Error(
-          "The installed mods or Active list changed. Review the refreshed import preview before staging it.",
-        );
-      }
-      draft.actions.stageImportedActiveList(
-        modListActualPanels.active,
-        plan.targetMods,
-        {
-          savedIds,
-          activeIds: modListActualPanels.activeIds,
-          activePackageIds: active.packageIds,
-          activeConfigTarget: normalizeActiveConfigTarget(settings),
-          activeError: modListConfigurationError,
-        },
-        plan.file.fileName,
-      );
-      workspaceActions.setSearch(modPanelModes.active, "");
-      workspaceActions.setSort(modPanelModes.active, modSorts.loadOrder);
-      workspaceActions.setModStatusFilter(modFilters.all);
-      const targetIds = plan.targetMods.map((mod) => mod.id);
-      const firstTarget = targetIds[0];
-      if (firstTarget) {
-        workspaceActions.select(modPanelModes.active, targetIds, firstTarget);
-      }
-      setModListImportPlan(undefined);
-      const unchanged =
-        plan.targetMods.length === modListActualPanels.active.length &&
-        plan.targetMods.every((mod, index) => mod.id === modListActualPanels.active[index]?.id);
-      const summary = unchanged
-        ? `${plan.file.fileName} already matches the current Active list`
-        : `${plan.file.fileName} staged: ${plan.activatedMods.length} added, ${plan.deactivatedMods.length} removed`;
-      setNotice(summary);
-      if (plan.missingPackageIds.length) {
-        notifyWarning(
-          `${plan.missingPackageIds.length} unavailable ${plan.missingPackageIds.length === 1 ? "package was" : "packages were"} omitted from the imported draft.`,
-        );
-      }
-    });
-  }
-
-  function exportModList() {
-    void perform(async () => {
-      if (exportModListDisabledReason) {
-        return;
-      }
-      const packageIds = buildModListExportPackageIds(
-        panels.active,
-        activeMetadataVerified ? (active.installedMods ?? []) : [],
-      );
-      const result = await run(() =>
-        getStore().exportModList({
-          gameVersion: requireValue(
-            active.gameVersion?.trim(),
-            "RimWorld's version could not be read from ModsConfig.xml.",
-          ),
-          packageIds,
-        }),
-      );
-      if (result) {
-        const metadataNote = !activeMetadataVerified
-          ? "; installed-copy hints were omitted because mod folders are unavailable"
-          : "";
-        const configurationNote = retainedActiveConfiguration
-          ? "; used the last readable Active configuration"
-          : "";
-        setNotice(
-          `Exported ${result.packageCount} ${result.packageCount === 1 ? "mod" : "mods"} to ${result.fileName}${metadataNote}${configurationNote}`,
-        );
-      }
-    });
-  }
-
   function launchRimWorld() {
     void perform(async () => {
       if (
@@ -1448,16 +1171,16 @@ function Workspace() {
       <AppHeader
         disabled={!loaded || busy}
         cleanupDisabledReason={cleanupDisabledReason}
-        importDisabledReason={importModListDisabledReason}
-        exportDisabledReason={exportModListDisabledReason}
+        importDisabledReason={modLists.importDisabledReason}
+        exportDisabledReason={modLists.exportDisabledReason}
         onOpenSettings={() => void settingsDialog.open()}
-        onImportModList={importModList}
-        onExportModList={exportModList}
+        onImportModList={modLists.openImport}
+        onExportModList={modLists.exportList}
         onUnsubscribeInactive={unsubscribeInactiveMods}
         onManageTags={() => {
           tagDialogs.dispatch({ type: tagDialogActions.manage });
         }}
-        onSync={() => void workshop.sync()}
+        onSync={(mode) => void workshop.sync(mode)}
         workshopError={workshopStatus.error}
         activeError={active.error}
         metadataError={active.metadataError}
@@ -1597,15 +1320,13 @@ function Workspace() {
           onConfirm={confirmActivePosition}
         />
       )}
-      {modListImportPlan && (
+      {modLists.plan && (
         <ImportModListModal
-          plan={modListImportPlan}
+          plan={modLists.plan}
           disabled={draft.applying}
-          confirmDisabledReason={importModListDisabledReason}
-          onClose={() => {
-            setModListImportPlan(undefined);
-          }}
-          onConfirm={confirmModListImport}
+          confirmDisabledReason={modLists.importDisabledReason}
+          onClose={modLists.closeImport}
+          onConfirm={modLists.confirmImport}
         />
       )}
       <WorkspaceDraftBar disabled={!loaded || busy} onRun={launchRimWorld} />

@@ -725,6 +725,7 @@ export async function importInstalledSteamMods(
     subscribedIds,
     discoveredIds: subscribedIds,
     manifestPaths,
+    metadataAttemptedIds: [...completedMetadataRequests],
     missingMetadataIds,
     steamLibraryPaths: libraries,
     warnings,

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ActiveModsState, SteamOperationProgress } from "../../../shared/types";
+import { workshopSyncModes } from "../../../shared/domainConstants";
+import type {
+  ActiveModsState,
+  SteamOperationProgress,
+  WorkshopSyncMode,
+} from "../../../shared/types";
 import { getStore } from "../services/modStore";
 import { workshopResultNotice, workshopWarningMessage } from "../services/workshopActions";
 import type { useActionNotifications } from "./useActionNotifications";
@@ -49,19 +54,24 @@ export function useWorkshopActions({
     [adopt],
   );
 
-  async function sync() {
+  async function sync(mode: WorkshopSyncMode = workshopSyncModes.full) {
     clearProgress();
     await perform(async () => {
       try {
         await run(async () => {
-          const result = await getStore().syncSubscribedMods();
+          const result = await getStore().syncSubscribedMods(mode);
           adopt(result.vault);
           adoptActive(result.activeMods);
-          // A sync can add, remove, or update About.xml files. Do not let a settled inventory cache
-          // hide those changes for the rest of this session.
+          // Either sync mode can add or remove About.xml files. Do not let a settled inventory
+          // cache hide those changes for the rest of this session.
           refreshActive(false, true, true);
           setNotice(
-            workshopResultNotice(result, "Workshop folders synchronized; saved mods retained"),
+            workshopResultNotice(
+              result,
+              mode === workshopSyncModes.full
+                ? "Workshop folders synchronized; saved mods retained"
+                : "Workshop additions and removals refreshed; existing metadata retained",
+            ),
           );
           onWorkshopStatus(
             result.folderWarnings?.length ? result.folderWarnings.join("; ") : undefined,

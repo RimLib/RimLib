@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AppHeader } from "../src/renderer/src/components/AppHeader";
 import { ErrorNotification } from "../src/renderer/src/components/common/ErrorNotification";
 import { ModRowView as ModRow } from "../src/renderer/src/components/common/ModRow";
+import { WorkshopSyncControlView } from "../src/renderer/src/components/common/WorkshopSyncControl";
 import { ModInfoPanel } from "../src/renderer/src/components/panels/ModInfoPanel";
 import {
   ModsPanelView as ModsPanel,
@@ -564,6 +565,10 @@ void test("global tag management, Steam synchronization and inactive cleanup app
   );
   assert.equal((header.match(/aria-label="Manage Tags"/g) ?? []).length, 1);
   assert.equal((header.match(/aria-label="Sync Workshop"/g) ?? []).length, 1);
+  assert.equal((header.match(/aria-label="Choose Workshop sync type"/g) ?? []).length, 1);
+  assert.match(header, /aria-haspopup="menu"/);
+  assert.match(header, /aria-expanded="false"/);
+  assert.doesNotMatch(header, /role="menu"/);
   assert.equal((header.match(/aria-label="Unsubscribe all non-active mods"/g) ?? []).length, 1);
   assert.doesNotMatch(
     requireValue(/<button[^>]*aria-label="Unsubscribe all non-active mods"[^>]*>/.exec(header))[0],
@@ -590,8 +595,32 @@ void test("global tag management, Steam synchronization and inactive cleanup app
       onUnsubscribeInactive={noop}
     />,
   );
-  assert.equal((busy.match(/<button[^>]*disabled/g) ?? []).length, 3);
+  assert.equal((busy.match(/<button[^>]*disabled/g) ?? []).length, 4);
   assert.match(busy, /data-tip="An operation is in progress"/);
+});
+
+void test("Workshop synchronization offers documented light and full refresh menu choices", () => {
+  const html = renderToStaticMarkup(
+    <WorkshopSyncControlView
+      disabled={false}
+      menuId="workshop-sync-test-menu"
+      open
+      onMenuToggle={noop}
+      onSelect={noop}
+      onSync={noop}
+    />,
+  );
+  assert.match(html, /aria-label="Sync Workshop"/);
+  assert.match(
+    html,
+    /aria-controls="workshop-sync-test-menu"[^>]*aria-expanded="true"[^>]*aria-haspopup="menu"/,
+  );
+  assert.match(html, /id="workshop-sync-test-menu" role="menu" aria-label="Workshop sync type"/);
+  assert.equal((html.match(/role="menuitem"/g) ?? []).length, 2);
+  assert.match(html, /Light refresh/);
+  assert.match(html, /Check only for new and removed Workshop mods\./);
+  assert.match(html, /Full refresh/);
+  assert.match(html, /Refresh every installed mod and its Workshop metadata\./);
 });
 
 void test("folder discovery does not change active panel scope or add row subscription controls", () => {

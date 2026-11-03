@@ -115,6 +115,43 @@
     @apply border-[#303b48] bg-[#1a212a] text-[#d4dde7];
   }
 
+  .workshop-sync-control {
+    @apply relative inline-flex shrink-0;
+  }
+
+  .workshop-sync-primary {
+    @apply rounded-r-none;
+  }
+
+  .workshop-sync-trigger {
+    @apply min-w-[34px] rounded-l-none border-l-0 px-1.5;
+  }
+
+  .workshop-sync-menu {
+    @apply absolute top-full right-0 z-[1000] mt-1 w-72 gap-1 rounded-md border border-[#394553] bg-[#171d25] p-1.5 text-[#e8edf2] shadow-lg;
+  }
+
+  .workshop-sync-menu button {
+    @apply flex w-full flex-col items-start gap-0.5 rounded px-2.5 py-2 text-left transition-colors;
+  }
+
+  .workshop-sync-menu button:hover,
+  .workshop-sync-menu button:focus-visible {
+    @apply bg-white/10;
+  }
+
+  .workshop-sync-menu button:focus-visible {
+    @apply outline-2 outline-offset-[-2px] outline-[#d7a84f];
+  }
+
+  .workshop-sync-menu-title {
+    @apply text-[13px] font-bold text-[#e8edf2];
+  }
+
+  .workshop-sync-menu-description {
+    @apply text-xs leading-snug text-[#9aa7b6];
+  }
+
   .danger-action {
     @apply border-[#9b5963] bg-[#4a2430] text-[#f9d6d6];
   }
