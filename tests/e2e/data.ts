@@ -74,6 +74,10 @@ export function sampleVault(config: string, workshop: string): ModVault {
     localSteamState: {
       source: steamStatusSources.workshopFolders,
       observedIds: [...initialSubscribedIds],
+      // The shared fixture represents an established library whose existing Workshop metadata was
+      // already attempted. Tests that discover a new folder still exercise the automatic refresh
+      // for that new ID without every unrelated test racing a background startup sync.
+      metadataAttemptedIds: [...initialSubscribedIds],
       pending: {},
     },
     settings: { rimWorldConfigPath: config, workshopModsPath: workshop },

@@ -249,6 +249,7 @@ test.describe("Offline Steam", () => {
       desktop.page.getByRole("menuitem", { name: "Add tags", exact: true }),
     ).toBeEnabled();
     await desktop.page.keyboard.press("Escape");
+    await expect(desktop.page.getByRole("menu")).toHaveCount(0);
 
     const subscribed = desktop.row(desktop.inactive, sampleMods.spare.name);
     await subscribed.locator(".mod-row-main").click();
@@ -260,6 +261,7 @@ test.describe("Offline Steam", () => {
       desktop.page.getByRole("menuitem", { name: "Unsubscribe", exact: true }),
     ).toBeEnabled();
     await desktop.page.keyboard.press("Escape");
+    await expect(desktop.page.getByRole("menu")).toHaveCount(0);
 
     await unsubscribed.locator(".mod-row-main").click();
     await subscribe.click();

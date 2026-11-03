@@ -295,6 +295,22 @@ test("removing an inactive subscribed mod stages unsubscribe and removal as one 
     .poll(async () => (await desktop.mod(sampleMods.other.id)).gameVersions)
     .toEqual(["1.6"]);
   const before = await desktop.vault();
+  const expectedPendingChanges = [
+    { action: "unsubscribe", workshopId: sampleMods.other.id },
+    { action: "remove", workshopId: sampleMods.other.id },
+  ];
+  const savedPendingChanges = async () =>
+    (await desktop.vault()).pendingDraft?.changes.map(({ action, target }) => ({
+      action,
+      workshopId: target.workshopId,
+    }));
+  const expectLibraryUnchanged = async () => {
+    const current = await desktop.vault();
+    expect(current.mods).toEqual(before.mods);
+    expect(current.userTags).toEqual(before.userTags);
+    expect(current.localSteamState).toEqual(before.localSteamState);
+    expect(current.settings).toEqual(before.settings);
+  };
   const row = desktop.row(desktop.inactive, sampleMods.other.name);
   await row.locator(".mod-row-main").click();
   await expect(
@@ -315,7 +331,8 @@ test("removing an inactive subscribed mod stages unsubscribe and removal as one 
   await expect(row).toContainText("Pending unsubscribe");
   await expect(row).toContainText("Pending removal");
   expect(await desktop.calls("unsubscribe")).toEqual([]);
-  expect(await desktop.vault()).toEqual(before);
+  await expect.poll(savedPendingChanges).toEqual(expectedPendingChanges);
+  await expectLibraryUnchanged();
 
   const review = await desktop.reviewDraft();
   await expect(review.getByRole("listitem")).toHaveCount(2);
@@ -324,7 +341,8 @@ test("removing an inactive subscribed mod stages unsubscribe and removal as one 
   await review.getByRole("button", { name: "Cancel", exact: true }).click();
 
   expect(await desktop.calls("unsubscribe")).toEqual([]);
-  expect(await desktop.vault()).toEqual(before);
+  await expect.poll(savedPendingChanges).toEqual(expectedPendingChanges);
+  await expectLibraryUnchanged();
   await expect(row).toContainText("Pending unsubscribe");
   await expect(row).toContainText("Pending removal");
 

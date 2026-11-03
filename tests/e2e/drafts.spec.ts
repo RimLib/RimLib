@@ -726,6 +726,7 @@ test("manual order drafts stay separate while Auto-sort replaces only the earlie
   await expect(manualRows.nth(1)).toContainText(sampleMods.camera.name);
   await expect(manualRows.nth(1)).toContainText("Move from position 4 to position 3");
   await manualReview.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(manualReview).toHaveCount(0);
 
   await desktop.active.getByRole("button", { name: "Auto-sort active mods" }).click();
   const dependencies = desktop.page.getByRole("dialog", { name: "Missing dependencies" });
@@ -747,6 +748,7 @@ test("manual order drafts stay separate while Auto-sort replaces only the earlie
   await expect(autoRows.nth(0)).toContainText("Auto-sort: move from position 4 to position 3");
   await expect(autoRows.nth(0)).toContainText("Pending order");
   await autoReview.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(autoReview).toHaveCount(0);
 
   await stageMove(sampleMods.active.name, 4, 1);
   await expect(names).toHaveText([
