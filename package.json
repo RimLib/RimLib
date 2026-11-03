@@ -35,7 +35,7 @@
     "fast-xml-parser": "5.11.2",
     "fast-xml-validator": "1.4.2",
     "firebase": "13.0.0",
-    "lucide-react": "1.53.0",
+    "lucide-react": "1.55.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "steamworks.js": "0.4.0",
