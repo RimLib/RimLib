@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FirebaseSyncSettings, ModVault } from "../../../shared/types";
-import { connectFirebase, disconnectFirebase, syncFirebaseVault } from "../services/firebaseSync";
+import type {
+  connectFirebase,
+  disconnectFirebase,
+  syncFirebaseVault,
+} from "../services/firebaseSync";
 import { getStore } from "../services/modStore";
+
+interface FirebaseService {
+  connectFirebase: typeof connectFirebase;
+  disconnectFirebase: typeof disconnectFirebase;
+  syncFirebaseVault: typeof syncFirebaseVault;
+}
+
+let firebaseService: Promise<FirebaseService> | undefined;
+
+function loadFirebaseService() {
+  firebaseService ??= import("../services/firebaseSync");
+  return firebaseService;
+}
 
 export type FirebaseSyncPhase =
   "disabled" | "signed-out" | "connecting" | "syncing" | "synced" | "conflict" | "error";
@@ -54,6 +71,7 @@ export function useFirebaseSync({
       syncing.current = true;
       setStatus({ phase: "syncing", message: "Syncing with Firestore…" });
       try {
+        const { syncFirebaseVault } = await loadFirebaseService();
         await run(async () => {
           const current = await getStore().load();
           const result = await syncFirebaseVault(current);
@@ -106,6 +124,7 @@ export function useFirebaseSync({
       requested.current = true;
       setStatus({ phase: "connecting", message: "Connecting to Firebase…" });
       try {
+        const { connectFirebase } = await loadFirebaseService();
         await connectFirebase(next, password);
         connected.current = true;
       } catch (error) {
@@ -128,6 +147,7 @@ export function useFirebaseSync({
   const disconnect = useCallback(async (disabled = true) => {
     requested.current = !disabled;
     connected.current = false;
+    const { disconnectFirebase } = await loadFirebaseService();
     await disconnectFirebase();
     setStatus(
       disabled ? disabledStatus : { phase: "signed-out", message: "Signed out on this device" },

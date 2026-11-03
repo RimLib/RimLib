@@ -8,6 +8,10 @@ import {
   BulkTagsModal,
   type BulkTagsModalProps,
 } from "../src/renderer/src/components/modals/BulkTagsModal";
+import {
+  ManageTagsModal,
+  type ManageTagsModalProps,
+} from "../src/renderer/src/components/modals/ManageTagsModal";
 import { TagDialogs } from "../src/renderer/src/components/modals/TagDialogs";
 import {
   bulkTagOperation,
@@ -50,6 +54,8 @@ const renderDialogs = (dialog: TagDialog) =>
     mods: [mod("a"), mod("b")],
     tags: [tag],
     disabled: false,
+    inactiveCountByTagId: new Map([[tag.id, 2]]),
+    onAddTagToActive: noop,
   });
 
 void test("tag manager create, edit and delete have explicit return paths without overlapping dialogs", () => {
@@ -69,6 +75,84 @@ void test("tag manager create, edit and delete have explicit return paths withou
   assert.equal(deleting.kind, "delete");
   assert.deepEqual(tagDialogReducer(deleting, { type: "close" }), manager);
   assert.equal(tagDialogReducer(manager, { type: "close" }), closedTagDialog);
+});
+
+void test("tag manager exposes count-aware Add to Active actions and closes before routing them", () => {
+  const events: string[] = [];
+  const manager = tagDialogReducer(closedTagDialog, { type: "manage" });
+  const view: ReactElement<{ children?: ReactNode }> = TagDialogs({
+    workflow: {
+      dialog: manager,
+      dispatch: (action) => {
+        events.push(action.type);
+      },
+      assign: noop,
+      save: noop,
+      remove: noop,
+      applyBulk: noop,
+    },
+    mods: [mod("a"), mod("b")],
+    tags: [tag],
+    disabled: false,
+    inactiveCountByTagId: new Map([[tag.id, 2]]),
+    onAddTagToActive: (tagId) => {
+      events.push(`activate:${tagId}`);
+    },
+  });
+  const dialog = Children.toArray(view.props.children).find(
+    (child) => isValidElement(child) && child.type === ManageTagsModal,
+  );
+  assert.ok(isValidElement<ManageTagsModalProps>(dialog));
+  assert.equal(dialog.props.inactiveCountByTagId.get(tag.id), 2);
+
+  const html = renderToStaticMarkup(dialog);
+  assert.match(html, /lucide-list-plus/);
+  assert.match(html, />Add to Active</);
+  assert.match(html, /class="tag-add-active-count" aria-hidden="true">2</);
+  assert.match(html, /aria-label="Add 2 mods tagged Quality of life to Active"/);
+
+  dialog.props.onAddTagToActive(tag.id);
+  assert.deepEqual(events, ["close", `activate:${tag.id}`]);
+});
+
+void test("tag activation explains both empty-tag and global disabled states", () => {
+  const props: ManageTagsModalProps = {
+    tags: [tag],
+    inactiveCountByTagId: new Map(),
+    onAddTagToActive: noop,
+    onCreate: noop,
+    onEdit: noop,
+    onDelete: noop,
+    onClose: noop,
+  };
+  const empty = renderToStaticMarkup(<ManageTagsModal {...props} />);
+  assert.match(
+    empty,
+    /aria-label="Add 0 mods tagged Quality of life to Active\. No inactive mods tagged Quality of life"/,
+  );
+  assert.match(empty, /data-tip="No inactive mods tagged Quality of life"/);
+  assert.match(
+    empty,
+    /<button(?=[^>]*class="ghost-action tag-add-active-action")(?=[^>]*disabled="")[^>]*>/,
+  );
+
+  const global = renderToStaticMarkup(
+    <ManageTagsModal
+      {...props}
+      inactiveCountByTagId={new Map([[tag.id, 3]])}
+      addToActiveDisabledReason="Active configuration is unavailable"
+    />,
+  );
+  assert.match(
+    global,
+    /aria-label="Add 3 mods tagged Quality of life to Active\. Active configuration is unavailable"/,
+  );
+  assert.match(global, /data-tip="Active configuration is unavailable"/);
+  assert.match(global, /class="tag-add-active-count" aria-hidden="true">3</);
+  assert.match(
+    global,
+    /<button(?=[^>]*class="ghost-action tag-add-active-action")(?=[^>]*disabled="")[^>]*>/,
+  );
 });
 
 void test("bulk tag creation snapshots the selected IDs and keeps its chooser mounted while editing", () => {

@@ -8,6 +8,7 @@ import {
   applyWorkshopStatus,
   filterLibrary,
   modBatchAvailability,
+  modInstalledOrUpdatedAt,
   subscriptionPanels,
 } from "../src/renderer/src/utils/library";
 import { modSorts, type SearchScope, searchScopes } from "../src/renderer/src/utils/uiConstants";
@@ -149,7 +150,7 @@ void test("property: metadata and personal tag searches return exact subsets wit
   );
 });
 
-void test("property: scoped searching returns exact matches and download sorting is monotonic", () => {
+void test("property: scoped searching returns exact matches and install/update sorting is monotonic", () => {
   fc.assert(
     fc.property(
       modsArbitrary,
@@ -157,8 +158,13 @@ void test("property: scoped searching returns exact matches and download sorting
       fc.constantFrom(...Object.values(searchScopes)),
       fc.constantFrom(modSorts.newest, modSorts.oldest),
       (mods, query, scope, sort) => {
-        assertUnchanged(mods, () => {
-          const result = filterLibrary(mods, query, scope, sort);
+        const modsWithWorkshopUpdates = mods.map((mod, index) => ({
+          ...mod,
+          // Use an independently generated date to exercise the optional Workshop timestamp.
+          steamUpdatedAt: index % 2 === 0 ? mod.addedAt : undefined,
+        }));
+        assertUnchanged(modsWithWorkshopUpdates, () => {
+          const result = filterLibrary(modsWithWorkshopUpdates, query, scope, sort);
           const search = query.trim().toLowerCase();
           const matches = (mod: (typeof mods)[number], field: Exclude<SearchScope, "all">) => {
             const values = {
@@ -172,7 +178,7 @@ void test("property: scoped searching returns exact matches and download sorting
           assert.deepEqual(
             new Set(result.map((mod) => mod.id)),
             new Set(
-              mods
+              modsWithWorkshopUpdates
                 .filter((mod) =>
                   !search
                     ? true
@@ -186,8 +192,8 @@ void test("property: scoped searching returns exact matches and download sorting
             ),
           );
           for (let index = 1; index < result.length; index++) {
-            const previous = Date.parse(requireValue(result[index - 1]).downloadedAt) || 0;
-            const current = Date.parse(requireValue(result[index]).downloadedAt) || 0;
+            const previous = modInstalledOrUpdatedAt(requireValue(result[index - 1]));
+            const current = modInstalledOrUpdatedAt(requireValue(result[index]));
             assert.ok(sort === modSorts.newest ? previous >= current : previous <= current);
           }
         });
@@ -257,7 +263,7 @@ void test("property: current workshop observations update membership only and ar
   );
 });
 
-void test("property: batch actions cannot unsubscribe Active mods or delete subscribed records", () => {
+void test("property: subscribed inactive records are removable while Active records remain protected", () => {
   fc.assert(
     fc.property(workshopModsArbitrary, workshopIdArbitrary, (mods, id) => {
       const target = {
@@ -277,26 +283,12 @@ void test("property: batch actions cannot unsubscribe Active mods or delete subs
       };
       const selection = [...mods, target];
       const saved = new Set(selection.map((mod) => mod.id));
-      const guarded = modBatchAvailability(
-        selection,
-        saved,
-        false,
-        false,
-        undefined,
-        new Set([target.id]),
-      );
+      const guarded = modBatchAvailability(selection, saved, false, new Set([target.id]));
       assert.ok(guarded.subscriptionDisabledReason);
       assert.ok(guarded.removalDisabledReason);
-      const unreadable = modBatchAvailability(
-        selection,
-        saved,
-        false,
-        false,
-        undefined,
-        new Set(),
-        "Config unreadable",
-      );
-      assert.ok(unreadable.subscriptionDisabledReason);
+      const inactive = modBatchAvailability(selection, saved, false);
+      assert.equal(inactive.removalDisabledReason, undefined);
+      assert.equal(inactive.subscriptionDisabledReason, undefined);
     }),
     propertyOptions,
   );

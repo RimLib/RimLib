@@ -1,18 +1,17 @@
-import { ArrowLeft, ArrowRight, Play, TriangleAlert, Undo2 } from "lucide-react";
-import { memo } from "react";
+import { GripVertical, TriangleAlert } from "lucide-react";
+import { type DragEvent, memo, useMemo } from "react";
 
-import { subscriptionCommands } from "../../../../shared/domainConstants";
-import { isOfficialMod } from "../../../../shared/packages";
-import { isWorkshopMod } from "../../../../shared/subscriptions";
-import type { Mod, ModDependency, ModTag, SubscriptionCommand } from "../../../../shared/types";
+import { isOfficialMod, normalizePackageId, rimWorldPackages } from "../../../../shared/packages";
+import type { Mod, ModTag, SubscriptionCommand } from "../../../../shared/types";
 import { useDraftStore, useWorkspaceStore } from "../../stores/WorkspaceStoreProvider";
+import type { ActiveModIssue } from "../../utils/activeValidation";
 import type { DraftAction } from "../../utils/drafts";
 import { getModHue } from "../../utils/mods";
 import type { MenuPoint, ModPanelMode, SelectionModifiers } from "../../utils/modSelection";
 import { DraftBadge } from "./DraftBadge";
 import { ModImage } from "./ModImage";
+import { OfficialMarker } from "./OfficialMarker";
 import { TagChip } from "./TagChip";
-import { TooltipIconButton } from "./TooltipIconButton";
 
 export interface ModRowViewProps {
   mod: Mod;
@@ -20,7 +19,8 @@ export interface ModRowViewProps {
   selected: boolean;
   focused?: boolean;
   active?: boolean;
-  missingDependencies?: readonly ModDependency[];
+  loadOrder?: number;
+  validationIssues?: readonly ActiveModIssue[];
   subscriptionDisabled?: boolean;
   subscriptionDisabledReason?: string;
   draftDisabled?: boolean;
@@ -28,8 +28,20 @@ export interface ModRowViewProps {
   subscriptionAction: SubscriptionCommand;
   onSelect: (id: string, modifiers?: SelectionModifiers) => void;
   onToggle: (id: string) => void;
+  onToggleActive?: (id: string) => void;
+  activeToggleDisabledReason?: string;
   onContextMenu?: (id: string, point: MenuPoint) => void;
+  showReorderHandle?: boolean;
+  reorderable?: boolean;
+  reorderDisabledReason?: string;
+  dragging?: boolean;
+  dropPlacement?: "before" | "after";
+  onReorderDragStart?: (id: string) => void;
+  onReorderDragOver?: (id: string, placement: "before" | "after") => void;
+  onReorderDrop?: (id: string, placement: "before" | "after") => void;
+  onReorderDragEnd?: () => void;
   pendingAction?: DraftAction;
+  pendingActions?: readonly DraftAction[];
   onUndoDraft?: (id: string) => void;
 }
 
@@ -54,8 +66,10 @@ export const ModRow = memo(function ModRow({
   );
   const focused = useWorkspaceStore((state) => state.focusedModId === id);
   const workspaceActions = useWorkspaceStore((state) => state.actions);
-  const pendingAction = useDraftStore(
-    (state) => state.changes.find((change) => change.mod.id === id)?.action,
+  const draftChanges = useDraftStore((state) => state.changes);
+  const pendingActions = useMemo(
+    () => draftChanges.filter((change) => change.mod.id === id).map((change) => change.action),
+    [draftChanges, id],
   );
   const undoDraft = useDraftStore((state) => state.actions.undo);
 
@@ -64,7 +78,7 @@ export const ModRow = memo(function ModRow({
       {...props}
       selected={selected}
       focused={focused}
-      pendingAction={pendingAction}
+      pendingActions={pendingActions}
       onUndoDraft={undoDraft}
       onSelect={(modId, modifiers) => {
         workspaceActions.select(mode, orderedIds, modId, modifiers);
@@ -86,73 +100,73 @@ export const ModRowView = memo(function ModRowView({
   selected,
   focused,
   active,
-  missingDependencies = [],
-  editable = true,
-  subscriptionAction,
-  subscriptionDisabled = false,
-  subscriptionDisabledReason,
+  loadOrder,
+  validationIssues,
+  editable: _editable = true,
+  subscriptionAction: _subscriptionAction,
+  subscriptionDisabled: _subscriptionDisabled = false,
+  subscriptionDisabledReason: _subscriptionDisabledReason,
   draftDisabled = false,
   onSelect,
-  onToggle,
+  onToggle: _onToggle,
+  onToggleActive,
+  activeToggleDisabledReason,
   onContextMenu,
+  showReorderHandle = false,
+  reorderable = false,
+  reorderDisabledReason,
+  dragging = false,
+  dropPlacement,
+  onReorderDragStart,
+  onReorderDragOver,
+  onReorderDrop,
+  onReorderDragEnd,
   pendingAction,
-  onUndoDraft,
+  pendingActions,
+  onUndoDraft: _onUndoDraft,
 }: ModRowViewProps) {
   const assigned = tags.filter((tag) => mod.userTagIds?.includes(tag.id));
-  const locked = isOfficialMod(mod);
-  const unsubscribe = subscriptionAction === subscriptionCommands.unsubscribe;
-  const activeProtection = unsubscribe && active;
-  const actionDisabled = pendingAction
-    ? draftDisabled || !onUndoDraft
-    : subscriptionDisabled || !editable || !isWorkshopMod(mod) || Boolean(activeProtection);
-  const actionLabel = pendingAction
-    ? `Undo pending change for ${mod.name}`
-    : subscriptionAction === subscriptionCommands.subscribe
-      ? `Subscribe to ${mod.name}`
-      : `Unsubscribe from ${mod.name}`;
-  const action = (
-    <TooltipIconButton
-      aria-label={actionLabel}
-      label={
-        pendingAction
-          ? actionLabel
-          : activeProtection
-            ? "Active mods cannot be unsubscribed"
-            : !editable
-              ? "Sync Workshop folders to save this mod before changing its subscription"
-              : !isWorkshopMod(mod)
-                ? "Local mods have no Steam subscription"
-                : subscriptionDisabled
-                  ? (subscriptionDisabledReason ?? "Subscription changes are unavailable")
-                  : actionLabel
-      }
-      placement={unsubscribe ? "right" : "left"}
-      className={`icon-button ${unsubscribe ? "danger" : "success"}`}
-      disabled={actionDisabled}
-      onClick={() => {
-        if (!actionDisabled) {
-          if (pendingAction) {
-            onUndoDraft?.(mod.id);
-          } else {
-            onToggle(mod.id);
-          }
-        }
-      }}
-    >
-      {pendingAction ? (
-        <Undo2 size={16} aria-hidden />
-      ) : unsubscribe ? (
-        <ArrowLeft size={16} aria-hidden />
-      ) : (
-        <ArrowRight size={16} aria-hidden />
-      )}
-    </TooltipIconButton>
+  const displayedTags = selected ? assigned : assigned.slice(0, 2);
+  const hiddenTags = selected ? [] : assigned.slice(2);
+  const tagNames = assigned.map((tag) => tag.name).join(", ");
+  const official = isOfficialMod(mod);
+  const locked = official && normalizePackageId(mod.packageId ?? "") === rimWorldPackages.core;
+  const actions = pendingActions ?? (pendingAction ? [pendingAction] : []);
+  const activityDisabled = draftDisabled || locked || Boolean(activeToggleDisabledReason);
+  const validationCount = validationIssues?.length ?? 0;
+  const onlyMissingDependencies = validationIssues?.every(
+    ({ code }) => code === "missing-dependency",
   );
+  const validationLabel = onlyMissingDependencies
+    ? validationCount === 1
+      ? "1 missing dependency"
+      : `${validationCount} missing dependencies`
+    : validationCount === 1
+      ? "1 validation error"
+      : `${validationCount} validation errors`;
+  const validationTitle = validationIssues?.map(({ message }) => message).join("\n");
   return (
     <div
-      className={`mod-row ${unsubscribe ? "action-start" : ""} ${selected ? "selected" : ""} ${pendingAction ? `pending-${pendingAction}` : ""}`}
+      className={`mod-row ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropPlacement ? `drop-${dropPlacement}` : ""} ${actions.map((action) => `pending-${action}`).join(" ")}`}
       role="listitem"
       aria-current={focused ? "true" : undefined}
+      onDragOver={(event) => {
+        if (!reorderable || !onReorderDragOver) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        const rect = event.currentTarget.getBoundingClientRect();
+        onReorderDragOver(mod.id, event.clientY < rect.top + rect.height / 2 ? "before" : "after");
+      }}
+      onDrop={(event) => {
+        if (!reorderable || !onReorderDrop) {
+          return;
+        }
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        onReorderDrop(mod.id, event.clientY < rect.top + rect.height / 2 ? "before" : "after");
+      }}
       onContextMenu={(event) => {
         if (!onContextMenu) {
           return;
@@ -170,17 +184,29 @@ export const ModRowView = memo(function ModRowView({
         );
       }}
     >
-      {unsubscribe && action}
       <button
         type="button"
         className="mod-row-main"
         aria-pressed={selected}
+        title={
+          activeToggleDisabledReason ??
+          (locked
+            ? "RimWorld Core must remain active"
+            : active
+              ? "Double-click to stage deactivation"
+              : "Double-click to stage activation")
+        }
         onClick={(event) => {
           onSelect(mod.id, {
             shiftKey: event.shiftKey,
             metaKey: event.metaKey,
             ctrlKey: event.ctrlKey,
           });
+        }}
+        onDoubleClick={() => {
+          if (!activityDisabled) {
+            onToggleActive?.(mod.id);
+          }
         }}
       >
         <span className={mod.thumbnail ? "thumb has-image" : `thumb ${getModHue(mod)}`}>
@@ -190,35 +216,65 @@ export const ModRowView = memo(function ModRowView({
           <strong title={mod.name}>{mod.name}</strong>
           <span>{mod.author}</span>
         </span>
-        <span className="mod-row-status" title={assigned.map((tag) => tag.name).join(", ")}>
-          {active && (
-            <span className="active-pill">
-              <Play size={11} aria-hidden />
-              Active
-            </span>
-          )}
-          {missingDependencies.length > 0 && (
-            <span
-              className="dependency-warning-pill"
-              title={`Missing active dependencies: ${missingDependencies.map((dependency) => dependency.displayName ?? dependency.packageId).join(", ")}`}
-            >
+        <span className="mod-row-status" title={tagNames || undefined}>
+          {official && <OfficialMarker />}
+          {validationCount > 0 && (
+            <span className="dependency-warning-pill" title={validationTitle}>
               <TriangleAlert size={11} aria-hidden />
-              {missingDependencies.length === 1
-                ? "1 missing dependency"
-                : `${missingDependencies.length} missing dependencies`}
+              {validationLabel}
             </span>
           )}
-          {pendingAction && <DraftBadge action={pendingAction} />}
-          {assigned.slice(0, 2).map((tag) => (
-            <TagChip key={tag.id} tag={tag} />
+          {actions.map((action) => (
+            <DraftBadge key={action} action={action} />
           ))}
-          {assigned.length > 2 && <span className="extra-tags">+{assigned.length - 2}</span>}
-          {!mod.workshopId && (
-            <span className="unsubscribed-pill">{locked ? "Core / DLC" : "Local"}</span>
+          {displayedTags.map((tag) => (
+            <TagChip key={tag.id} tag={tag} title={selected ? tagNames : undefined} />
+          ))}
+          {hiddenTags.length > 0 && (
+            <span
+              className="extra-tags"
+              title={tagNames}
+              aria-label={`${hiddenTags.length} more ${hiddenTags.length === 1 ? "tag" : "tags"}: ${hiddenTags.map((tag) => tag.name).join(", ")}`}
+            >
+              +{hiddenTags.length}
+            </span>
           )}
+          {!mod.workshopId && !official && <span className="unsubscribed-pill">Local</span>}
         </span>
+        {active && (showReorderHandle || loadOrder !== undefined) && (
+          <span className="mod-row-order">
+            {showReorderHandle && (
+              <span
+                className={`drag-handle ${reorderable ? "" : "disabled"}`}
+                draggable={reorderable}
+                title={
+                  reorderable
+                    ? `Drag ${mod.name} to change its load position`
+                    : reorderDisabledReason
+                }
+                onDragStart={(event: DragEvent<HTMLSpanElement>) => {
+                  if (!reorderable || !onReorderDragStart) {
+                    event.preventDefault();
+                    return;
+                  }
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", mod.id);
+                  onReorderDragStart(mod.id);
+                }}
+                onDragEnd={onReorderDragEnd}
+                aria-hidden="true"
+              >
+                <GripVertical size={15} />
+              </span>
+            )}
+            {loadOrder !== undefined && (
+              <span className="load-order-number" aria-label={`Load order ${loadOrder}`}>
+                {loadOrder}
+              </span>
+            )}
+          </span>
+        )}
       </button>
-      {!unsubscribe && action}
     </div>
   );
 });

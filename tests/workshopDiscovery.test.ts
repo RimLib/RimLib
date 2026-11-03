@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { getActiveModsView, InstalledModIndex } from "../src/main/installedMods";
+import { SessionLogger, setSessionLogger } from "../src/main/logging";
 import type { SteamClient } from "../src/main/steamClient";
 import { SteamOperations } from "../src/main/steamOperations";
 import {
@@ -25,6 +35,7 @@ import { assignTagsToMods } from "../src/shared/tags";
 import type { Mod } from "../src/shared/types";
 import { requireValue } from "../src/shared/validation";
 import { mergeSteamSync, normalizeVault, serializeVault } from "../src/shared/vault";
+import { parseLogRecord } from "./helpers/logRecords";
 
 const mod = (id: string, localPath?: string): Mod => ({
   id: `steam-${id}`,
@@ -209,7 +220,7 @@ void test("a disconnected Workshop drive preserves the readable game's active pa
     assert.equal(active.error, undefined);
     assert.match(active.metadataError ?? "", /Installed mod metadata is unavailable/);
     assert.deepEqual(active.packageIds, order);
-    assert.equal(active.configPath, configPath);
+    assert.equal(active.configPath, await realpath(configPath));
     const saved = [mod("1"), mod("2")];
     const entries = buildActiveMods(active, saved).entries;
     assert.deepEqual(
@@ -467,6 +478,52 @@ void test("Active metadata uses the same override and invalidates its cache when
     );
   }));
 
+void test("installed metadata caching coalesces ordinary reads, queues in-flight force requests and refreshes settled results", async () =>
+  temporary(async (directory) => {
+    const selected = root(directory);
+    const aboutPath = join(selected, "1", "About", "About.xml");
+    await mkdir(join(selected, "1", "About"), { recursive: true });
+    await writeFile(
+      aboutPath,
+      "<ModMetaData><name>Before refresh</name><packageId>author.before</packageId></ModMetaData>",
+    );
+
+    const index = new InstalledModIndex(60_000);
+    const first = index.read([], selected);
+    assert.equal(index.read([], selected), first, "ordinary reads must share an in-flight scan");
+    const queuedRefresh = index.read([], selected, true);
+    assert.notEqual(
+      queuedRefresh,
+      first,
+      "a forced read must queue a fresh scan instead of adopting in-flight metadata",
+    );
+    assert.equal(
+      index.read([], selected, true),
+      queuedRefresh,
+      "multiple force requests must share the same queued refresh",
+    );
+    const [initial, queued] = await Promise.all([first, queuedRefresh]);
+    assert.equal(initial[0]?.packageId, "author.before");
+    assert.equal(queued[0]?.packageId, "author.before");
+
+    await writeFile(
+      aboutPath,
+      "<ModMetaData><name>After refresh</name><packageId>author.after</packageId></ModMetaData>",
+    );
+    const cached = index.read([], selected);
+    assert.equal(
+      index.read([], selected),
+      cached,
+      "a settled result must be reused inside the cache window",
+    );
+    assert.equal((await cached)[0]?.packageId, "author.before");
+
+    const refreshed = index.read([], selected, true);
+    assert.notEqual(refreshed, cached, "a forced read must replace a settled cached scan");
+    assert.equal((await refreshed)[0]?.packageId, "author.after");
+    assert.equal(index.read([], selected), refreshed);
+  }));
+
 void test("discovery uses numeric Workshop directories across libraries, not manifests, Steam metadata or local game mods", async () =>
   temporary(async (directory) => {
     const libraries = [join(directory, "first"), join(directory, "external")];
@@ -567,6 +624,106 @@ void test("optional web metadata failures do not prevent import of local names, 
     assert.equal(requireValue(imported.mods[0]).name, "Local name");
     assert.equal(requireValue(imported.mods[1]).packageId, undefined);
     assert.match(requireValue(imported.warnings[0]), /Offline/);
+  }));
+
+void test("metadata import records only batches completed before a later request failure", async () => {
+  const ids = Array.from({ length: 201 }, (_, index) => String(index + 1));
+  const batches: string[][] = [];
+  const imported = await importInstalledSteamMods(
+    {
+      ...snapshot([]),
+      folders: ids.map((workshopId) => ({ workshopId, path: `missing-${workshopId}` })),
+    },
+    undefined,
+    async (_input, init) => {
+      assert.ok(init?.body instanceof URLSearchParams);
+      const requested = [...init.body.entries()]
+        .filter(([key]) => key.startsWith("publishedfileids["))
+        .map(([, id]) => id);
+      batches.push(requested);
+      if (batches.length === 2) {
+        throw new Error("Later metadata batch failed");
+      }
+      return Response.json({ response: { publishedfiledetails: [] } });
+    },
+  );
+
+  assert.deepEqual(
+    batches.map((batch) => batch.length),
+    [100, 100],
+  );
+  assert.deepEqual(imported.subscribedIds, ids);
+  const attemptedIds = requireValue(imported.metadataAttemptedIds);
+  assert.deepEqual(attemptedIds, ids.slice(0, 100));
+  assert.ok(!attemptedIds.includes("101"));
+  assert.ok(!attemptedIds.includes("201"));
+});
+
+void test("missing remote details and installed package identities return actionable warnings and WARN logs", async () =>
+  temporary(async (directory) => {
+    for (const [id, about] of [
+      ["1", "<name>Complete local mod</name><packageId>author.complete</packageId>"],
+      ["2", "<name>Local fallback</name><packageId>author.fallback</packageId>"],
+      ["3", "<name>Missing identity</name>"],
+    ] as const) {
+      const path = join(root(directory), id, "About");
+      await mkdir(path, { recursive: true });
+      await writeFile(join(path, "About.xml"), `<ModMetaData>${about}</ModMetaData>`);
+    }
+    const logger = new SessionLogger({
+      directory: join(directory, "logs"),
+      startup: { test: "Workshop metadata warnings" },
+      pruneOnStart: false,
+    });
+    setSessionLogger(logger);
+    try {
+      const imported = await importInstalledSteamMods(
+        await discoverWorkshopFolders([directory]),
+        undefined,
+        async () =>
+          Response.json({
+            response: {
+              // Steam omitted requested item 2. Item 3 has web metadata, but its installed
+              // About.xml cannot identify the package used by the active list and sorter.
+              publishedfiledetails: ["1", "3"].map((id) => ({
+                publishedfileid: id,
+                result: 1,
+                consumer_app_id: 294100,
+                title: `Remote ${id}`,
+              })),
+            },
+          }),
+      );
+
+      assert.deepEqual(imported.missingMetadataIds, ["2"]);
+      assert.equal(imported.warnings.length, 2);
+      assert.match(requireValue(imported.warnings[0]), /Workshop 2:.*did not return metadata/);
+      assert.match(requireValue(imported.warnings[1]), /Workshop 3:.*valid package ID/);
+      assert.equal(requireValue(imported.mods[1]).name, "Local fallback");
+
+      logger.close();
+      const records = (await readFile(logger.path, "utf8")).trim().split("\n").map(parseLogRecord);
+      const remoteWarning = requireValue(
+        records.find((entry) => entry.event === "steam.metadata.mod.unavailable"),
+      );
+      assert.equal(remoteWarning.level, "WARN");
+      assert.equal(remoteWarning.data.workshopId, "2");
+      assert.equal(remoteWarning.data.metadataStatus, "missing");
+      const aboutWarning = requireValue(
+        records.find((entry) => entry.event === "steam.metadata.about.incomplete"),
+      );
+      assert.equal(aboutWarning.level, "WARN");
+      assert.equal(aboutWarning.data.workshopId, "3");
+      assert.equal(
+        requireValue(
+          records.find((entry) => entry.event === "steam.metadata.import.completed-with-warnings"),
+        ).level,
+        "WARN",
+      );
+    } finally {
+      setSessionLogger();
+      logger.close();
+    }
   }));
 
 void test("bulk import rejects wrong-game metadata and drops malformed optional fields per item", async () =>

@@ -1,11 +1,11 @@
 import { cpus, release, totalmem, version } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, protocol, screen, shell } from "electron";
 
 import rimLibAppIcon from "../../assets/rimlib-app-icon.png?asset";
 import { applicationName } from "../shared/application";
-import { hasConstantValue } from "../shared/domainConstants";
+import { hasConstantValue, workshopSyncModes } from "../shared/domainConstants";
 import {
   type IpcArgs,
   type IpcChannel,
@@ -18,10 +18,17 @@ import { bytesPerMiB } from "../shared/limits";
 import { loggingLimits, logLevels, rendererErrorEvents } from "../shared/logging";
 import { getModWorkshopId } from "../shared/steam";
 import { vaultFileName } from "../shared/storage";
-import type { AppSettings, ModVault, SubscriptionAction, VaultSaveOptions } from "../shared/types";
+import type {
+  AppSettings,
+  ModListExportRequest,
+  ModVault,
+  SubscriptionAction,
+  VaultSaveOptions,
+  WorkshopSyncMode,
+} from "../shared/types";
 import { isRecord } from "../shared/validation";
 import { configureApplicationIdentity } from "./applicationIdentity";
-import { getActiveModsView } from "./installedMods";
+import { getActiveModsView, getInstalledMods } from "./installedMods";
 import { deleteLibraryMods } from "./libraryActions";
 import {
   captureConsole,
@@ -31,14 +38,32 @@ import {
   SessionLogger,
   setSessionLogger,
 } from "./logging";
-import { openDatabaseFolder, openWorkshopInBrowser, revealModFolder } from "./modActions";
+import {
+  launchRimWorld,
+  openDatabaseFolder,
+  openWorkshopInBrowser,
+  revealModFolder,
+} from "./modActions";
+import { exportRimWorldModListFile, importRimWorldModListFile } from "./modListFiles";
+import {
+  installOfficialContentImageProtocol,
+  registerOfficialContentImageScheme,
+} from "./officialContentImages";
 import { platforms, windowDefaults } from "./platformConstants";
+import {
+  defaultConfigPath,
+  getActiveMods,
+  resolveConfigPath,
+  setActiveMods,
+} from "./rimWorldConfig";
 import { assertSteamRunning, getSteamStatus } from "./steamAvailability";
 import { SteamOperations } from "./steamOperations";
 import { detectWorkshopModsPath, validateWorkshopModsPath } from "./steamWorkshop";
 import { VaultStore } from "./vaultStore";
 import { WindowCloseLifecycle } from "./windowCloseLifecycle";
 import { refreshModMetadata } from "./workshopMetadata";
+
+registerOfficialContentImageScheme(protocol);
 
 try {
   configureApplicationIdentity(app);
@@ -121,8 +146,28 @@ function requestSummary(channel: IpcChannel, args: unknown[]) {
       workshopSource: workshopModsPath ? "configured-folder" : "steam-libraries",
     };
   }
-  if (channel === ipcChannels.getActiveMods) {
+  if (channel === ipcChannels.exportModList) {
+    const request = isRecord(args[0]) ? args[0] : undefined;
+    return {
+      activeCount: Array.isArray(request?.packageIds) ? request.packageIds.length : undefined,
+    };
+  }
+  if (
+    channel === ipcChannels.getActiveModConfiguration ||
+    channel === ipcChannels.getInstalledMods ||
+    channel === ipcChannels.getActiveMods
+  ) {
     return { settings: args[0] };
+  }
+  if (channel === ipcChannels.setActiveMods) {
+    return {
+      settings: args[0],
+      activeCount: Array.isArray(args[1]) ? args[1].length : undefined,
+      expectedCount: Array.isArray(args[2]) ? args[2].length : undefined,
+    };
+  }
+  if (channel === ipcChannels.syncSubscribedMods) {
+    return { mode: args[0] ?? workshopSyncModes.full };
   }
   if (
     channel === ipcChannels.chooseWorkshopModsPath ||
@@ -352,6 +397,7 @@ app
         .map((display) => ({ size: display.size, scaleFactor: display.scaleFactor })),
       gpu: app.getGPUFeatureStatus(),
     });
+    installOfficialContentImageProtocol(protocol);
     ipcMain.on(ipcEvents.rendererError, (event, name: unknown, details: unknown) => {
       if (
         event.sender !== mainWindow?.webContents ||
@@ -392,6 +438,49 @@ app
     });
     handle(ipcChannels.load, () => store.load());
     handle(ipcChannels.openDatabaseFolder, () => openDatabaseFolder(store.path, shell));
+    handle(ipcChannels.launchRimWorld, () => launchRimWorld(shell));
+    handle(ipcChannels.importModList, async () => {
+      if (!mainWindow) {
+        return null;
+      }
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: "Import RimWorld mod list",
+        properties: ["openFile"],
+        filters: [{ name: "RimWorld XML mod list", extensions: ["xml"] }],
+      });
+      const path = result.filePaths[0];
+      if (result.canceled || !path) {
+        return null;
+      }
+      const imported = await importRimWorldModListFile(path);
+      return {
+        fileName: basename(path),
+        gameVersion: imported.version,
+        packageIds: imported.activeMods,
+        knownExpansions: imported.knownExpansions,
+      };
+    });
+    handle(ipcChannels.exportModList, async (request: ModListExportRequest) => {
+      if (!mainWindow) {
+        return null;
+      }
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "Export RimWorld mod list",
+        defaultPath: join(app.getPath("documents"), "RimWorld-mod-list.xml"),
+        filters: [{ name: "RimWorld XML mod list", extensions: ["xml"] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+      const settings = (await store.load()).settings;
+      const liveConfigPaths = [...new Set([defaultConfigPath(), resolveConfigPath(settings)])];
+      const outputPath = await exportRimWorldModListFile(
+        result.filePath,
+        { version: request.gameVersion, activeMods: request.packageIds },
+        { liveConfigPaths },
+      );
+      return { fileName: basename(outputPath), packageCount: request.packageIds.length };
+    });
     handle(ipcChannels.revealModFolder, async (id: string) =>
       revealModFolder(id, await store.load(), shell),
     );
@@ -444,8 +533,29 @@ app
         throw new Error(error);
       }
     });
+    handle(ipcChannels.getActiveModConfiguration, (settings?: AppSettings) =>
+      getActiveMods(settings),
+    );
+    handle(ipcChannels.getInstalledMods, (settings?: AppSettings, forceRefresh?: boolean) =>
+      getInstalledMods(settings, forceRefresh),
+    );
     handle(ipcChannels.getActiveMods, (settings?: AppSettings) => getActiveModsView(settings));
-    handle(ipcChannels.syncSubscribedMods, () => steam.syncSubscribedMods());
+    handle(
+      ipcChannels.setActiveMods,
+      async (
+        settings: AppSettings | undefined,
+        packageIds: string[],
+        expectedPackageIds: string[],
+      ) => {
+        await setActiveMods(settings, packageIds, expectedPackageIds);
+        // Verify the write from ModsConfig.xml without making an activity edit wait for the
+        // independent installed-mod inventory scan.
+        return getActiveMods(settings);
+      },
+    );
+    handle(ipcChannels.syncSubscribedMods, (mode?: WorkshopSyncMode) =>
+      steam.syncSubscribedMods(mode),
+    );
     handle(ipcChannels.refreshSubscriptions, () => steam.refreshSubscriptions());
     handle(ipcChannels.inspectWorkshopStatus, () => steam.inspectWorkshopStatus());
     handle(ipcChannels.getSteamStatus, () => getSteamStatus());

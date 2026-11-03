@@ -180,7 +180,12 @@ void test("storage and UI identifiers use current names while constant maps cann
     vault: "rimlib:vault",
     vaultBackup: "rimlib:vault:backup",
   });
-  assert.deepEqual(modPanelModes, { subscribed: "subscribed", unsubscribed: "unsubscribed" });
+  assert.deepEqual(modPanelModes, {
+    subscribed: "subscribed",
+    unsubscribed: "unsubscribed",
+    active: "subscribed",
+    inactive: "unsubscribed",
+  });
   assert.deepEqual(searchScopes, {
     all: "all",
     title: "title",

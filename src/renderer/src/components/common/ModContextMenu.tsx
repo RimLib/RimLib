@@ -1,5 +1,14 @@
-import { ArrowLeft, ArrowRight, Tag, Tags, Trash2 } from "lucide-react";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CircleMinus,
+  CirclePlus,
+  ListOrdered,
+  Tag,
+  Tags,
+  Trash2,
+} from "lucide-react";
+import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useWorkspaceStore } from "../../stores/WorkspaceStoreProvider";
@@ -8,34 +17,63 @@ import { keyboardKeys, modPanelModes } from "../../utils/uiConstants";
 
 export interface ModContextMenuContentProps {
   count: number;
-  subscribed: boolean;
+  subscribed?: boolean;
+  showSubscription?: boolean;
   tagsDisabledReason?: string;
   removeTagsDisabledReason?: string;
   subscriptionDisabledReason?: string;
+  subscribeDisabledReason?: string;
+  unsubscribeDisabledReason?: string;
+  activityDisabledReason?: string;
   removalDisabledReason?: string;
+  positionDisabledReason?: string;
+  removalRequiresUnsubscribe?: boolean;
   onAddTags: () => void;
   onRemoveTags: () => void;
-  onSubscription: () => void;
+  onSubscription?: () => void;
+  onSubscribe?: () => void;
+  onUnsubscribe?: () => void;
+  onAddToActive?: () => void;
+  onRemoveFromActive?: () => void;
+  onMoveToPosition?: () => void;
   onRemoveFromLibrary: () => void;
 }
 
 export function ModContextMenuContent({
   count,
   subscribed,
+  showSubscription = true,
   tagsDisabledReason,
   removeTagsDisabledReason,
   subscriptionDisabledReason,
+  subscribeDisabledReason,
+  unsubscribeDisabledReason,
+  activityDisabledReason,
   removalDisabledReason,
+  positionDisabledReason,
+  removalRequiresUnsubscribe = false,
   onAddTags,
   onRemoveTags,
   onSubscription,
+  onSubscribe,
+  onUnsubscribe,
+  onAddToActive,
+  onRemoveFromActive,
+  onMoveToPosition,
   onRemoveFromLibrary,
 }: ModContextMenuContentProps) {
   const removeReason = tagsDisabledReason ?? removeTagsDisabledReason;
-  const libraryReason =
-    removalDisabledReason ??
-    tagsDisabledReason ??
-    (subscribed ? "Unsubscribe these mods before removing them from the library" : undefined);
+  const libraryReason = removalDisabledReason ?? tagsDisabledReason;
+  const libraryActionDescription = removalRequiresUnsubscribe
+    ? count > 1
+      ? `Unsubscribe and remove ${count} mods from library`
+      : "Unsubscribe and remove from library"
+    : count > 1
+      ? `Remove ${count} mods from library`
+      : "Remove from library";
+  const addToActiveDescription = count > 1 ? `Add ${count} mods to Active` : "Add mod to Active";
+  const removeFromActiveDescription =
+    count > 1 ? `Remove ${count} mods from Active` : "Remove mod from Active";
   return (
     <ul className="menu mod-context-actions" role="menu" aria-label="Selected mod actions">
       <li className="menu-title" role="presentation">
@@ -71,27 +109,125 @@ export function ModContextMenuContent({
           Remove tags
         </button>
       </li>
-      <li role="none" title={subscriptionDisabledReason}>
-        <button
-          type="button"
-          role="menuitem"
-          className={subscribed ? "context-unsubscribe" : "context-subscribe"}
-          disabled={Boolean(subscriptionDisabledReason)}
-          onClick={() => {
-            if (!subscriptionDisabledReason) {
-              onSubscription();
-            }
-          }}
-        >
-          {subscribed ? <ArrowLeft size={16} aria-hidden /> : <ArrowRight size={16} aria-hidden />}
-          {subscribed ? "Unsubscribe" : "Subscribe"}
-        </button>
-      </li>
-      <li role="none" title={libraryReason}>
+      {onAddToActive && (
+        <li role="none" title={activityDisabledReason ?? addToActiveDescription}>
+          <button
+            type="button"
+            role="menuitem"
+            className="context-activate"
+            aria-description={activityDisabledReason ?? addToActiveDescription}
+            disabled={Boolean(activityDisabledReason)}
+            onClick={() => {
+              if (!activityDisabledReason) {
+                onAddToActive();
+              }
+            }}
+          >
+            <CirclePlus size={16} aria-hidden />
+            Add to Active
+          </button>
+        </li>
+      )}
+      {onRemoveFromActive && (
+        <li role="none" title={activityDisabledReason ?? removeFromActiveDescription}>
+          <button
+            type="button"
+            role="menuitem"
+            className="context-deactivate"
+            aria-description={activityDisabledReason ?? removeFromActiveDescription}
+            disabled={Boolean(activityDisabledReason)}
+            onClick={() => {
+              if (!activityDisabledReason) {
+                onRemoveFromActive();
+              }
+            }}
+          >
+            <CircleMinus size={16} aria-hidden />
+            Remove from Active
+          </button>
+        </li>
+      )}
+      {onMoveToPosition && (
+        <li role="none" title={positionDisabledReason}>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={Boolean(positionDisabledReason)}
+            onClick={() => {
+              if (!positionDisabledReason) {
+                onMoveToPosition();
+              }
+            }}
+          >
+            <ListOrdered size={16} aria-hidden />
+            Move to position…
+          </button>
+        </li>
+      )}
+      {showSubscription && onSubscribe && (
+        <li role="none" title={subscribeDisabledReason}>
+          <button
+            type="button"
+            role="menuitem"
+            className="context-subscribe"
+            disabled={Boolean(subscribeDisabledReason)}
+            onClick={() => {
+              if (!subscribeDisabledReason) {
+                onSubscribe();
+              }
+            }}
+          >
+            <ArrowRight size={16} aria-hidden />
+            Subscribe
+          </button>
+        </li>
+      )}
+      {showSubscription && onUnsubscribe && (
+        <li role="none" title={unsubscribeDisabledReason}>
+          <button
+            type="button"
+            role="menuitem"
+            className="context-unsubscribe"
+            disabled={Boolean(unsubscribeDisabledReason)}
+            onClick={() => {
+              if (!unsubscribeDisabledReason) {
+                onUnsubscribe();
+              }
+            }}
+          >
+            <ArrowLeft size={16} aria-hidden />
+            Unsubscribe
+          </button>
+        </li>
+      )}
+      {showSubscription && !onSubscribe && !onUnsubscribe && onSubscription && (
+        <li role="none" title={subscriptionDisabledReason}>
+          <button
+            type="button"
+            role="menuitem"
+            className={subscribed ? "context-unsubscribe" : "context-subscribe"}
+            disabled={Boolean(subscriptionDisabledReason)}
+            onClick={() => {
+              if (!subscriptionDisabledReason) {
+                onSubscription();
+              }
+            }}
+          >
+            {subscribed ? (
+              <ArrowLeft size={16} aria-hidden />
+            ) : (
+              <ArrowRight size={16} aria-hidden />
+            )}
+            {subscribed ? "Unsubscribe" : "Subscribe"}
+          </button>
+        </li>
+      )}
+      <li role="none" title={libraryReason ?? libraryActionDescription}>
         <button
           type="button"
           role="menuitem"
           className="context-unsubscribe"
+          aria-description={libraryReason ?? libraryActionDescription}
           disabled={Boolean(libraryReason)}
           onClick={() => {
             if (!libraryReason) {
@@ -100,7 +236,7 @@ export function ModContextMenuContent({
           }}
         >
           <Trash2 size={16} aria-hidden />
-          Remove from library
+          Remove
         </button>
       </li>
     </ul>
@@ -122,6 +258,14 @@ export function WorkspaceModContextMenu(props: Omit<ModContextMenuContentProps, 
       y={contextMenu.y}
       focusKey={focusedModId}
       subscribed={contextMenu.panel === modPanelModes.subscribed}
+      showSubscription={contextMenu.panel === modPanelModes.inactive}
+      onMoveToPosition={
+        contextMenu.panel === modPanelModes.active ? props.onMoveToPosition : undefined
+      }
+      onAddToActive={contextMenu.panel === modPanelModes.inactive ? props.onAddToActive : undefined}
+      onRemoveFromActive={
+        contextMenu.panel === modPanelModes.active ? props.onRemoveFromActive : undefined
+      }
       onClose={close}
     />
   );
@@ -156,7 +300,7 @@ export function ModContextMenu({
     ).focus({ preventScroll: true });
   }, [x, y, focusKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const outside = (event: PointerEvent) => {
       if (!container.current?.contains(event.target as Node)) {
         onClose();
@@ -170,19 +314,36 @@ export function ModContextMenu({
       onClose();
       returnFocus.current?.focus({ preventScroll: true });
     };
+    const scrollContainer = returnFocus.current?.closest<HTMLElement>('[role="list"]');
+    const openingScrollPosition = scrollContainer
+      ? { left: scrollContainer.scrollLeft, top: scrollContainer.scrollTop }
+      : undefined;
+    const scroll = () => {
+      // Chromium may deliver a scroll notification after the right-click's reveal scroll has
+      // already finished and this menu has mounted. Ignore that stale notification, but dismiss
+      // the menu once its owning list actually moves away from the opening position.
+      if (
+        scrollContainer &&
+        openingScrollPosition &&
+        (scrollContainer.scrollLeft !== openingScrollPosition.left ||
+          scrollContainer.scrollTop !== openingScrollPosition.top)
+      ) {
+        onClose();
+      }
+    };
     document.addEventListener("pointerdown", outside);
     window.addEventListener("keydown", key);
     window.addEventListener("resize", onClose);
     window.addEventListener("blur", onClose);
-    window.addEventListener("scroll", onClose, true);
+    scrollContainer?.addEventListener("scroll", scroll);
     return () => {
       document.removeEventListener("pointerdown", outside);
       window.removeEventListener("keydown", key);
       window.removeEventListener("resize", onClose);
       window.removeEventListener("blur", onClose);
-      window.removeEventListener("scroll", onClose, true);
+      scrollContainer?.removeEventListener("scroll", scroll);
     };
-  }, [onClose]);
+  }, [focusKey, onClose, x, y]);
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     const buttons = [

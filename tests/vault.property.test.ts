@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import fc from "fast-check";
 
+import type { PendingDraft } from "../src/shared/types";
 import { requireValue } from "../src/shared/validation";
 import {
   deleteLibraryModsExplicitly,
@@ -69,6 +70,54 @@ void test("property: JSON round trips preserve user data and unknown fields in e
         );
       }
     }),
+    propertyOptions,
+  );
+});
+
+void test("property: device-local pending order drafts round-trip and explicit clearing survives save normalization", () => {
+  fc.assert(
+    fc.property(
+      vaultArbitrary,
+      fc.uniqueArray(fc.integer({ min: 1, max: 10_000 }), {
+        minLength: 1,
+        maxLength: 12,
+      }),
+      fc.integer({ min: 1, max: 1_000_000 }),
+      (vault, ids, operationNumber) => {
+        const packages = ids.map((id) => `author.mod${id}`);
+        const base = ["ludeon.rimworld", ...packages];
+        const moved = requireValue(base.at(-1));
+        const operationId = `order-${operationNumber}`;
+        const pendingDraft: PendingDraft = {
+          version: 1,
+          changes: [],
+          activeOrder: [moved, ...base.slice(0, -1)],
+          activeOrderOperations: [
+            {
+              id: operationId,
+              kind: "manual",
+              method: "position",
+              packageId: moved,
+              modId: `local:${moved}`,
+              modName: moved,
+              fromPosition: base.length,
+              toPosition: 1,
+            },
+          ],
+          activeBasePackageIds: base,
+          activeBaseConfigTarget: "automatic",
+          operationMemberships: [{ operationId, packageIds: base }],
+        };
+        const withDraft = normalizeVault({ ...vault, pendingDraft });
+        const restored = normalizeVault(JSON.parse(JSON.stringify(serializeVault(withDraft))));
+        assert.deepEqual(restored.pendingDraft, pendingDraft);
+
+        const cleared = mergeVaultSave(restored, { ...restored, pendingDraft: undefined });
+        assert.equal(cleared.pendingDraft, undefined);
+        const reopened = normalizeVault(JSON.parse(JSON.stringify(serializeVault(cleared))));
+        assert.equal(reopened.pendingDraft, undefined);
+      },
+    ),
     propertyOptions,
   );
 });

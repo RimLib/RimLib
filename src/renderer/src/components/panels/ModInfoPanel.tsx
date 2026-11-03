@@ -1,5 +1,7 @@
 import {
   CalendarDays,
+  CircleMinus,
+  CirclePlus,
   ExternalLink,
   FolderOpen,
   Hash,
@@ -10,17 +12,23 @@ import {
   Trash2,
   TriangleAlert,
   User,
+  WandSparkles,
 } from "lucide-react";
 
+import { isOfficialMod } from "../../../../shared/packages";
 import { createSteamWorkshopUrl, getModWorkshopId } from "../../../../shared/steam";
+import { isWorkshopMod } from "../../../../shared/subscriptions";
 import type { Mod, ModDependency, ModTag } from "../../../../shared/types";
-import { dependencyAppliesToGameVersion } from "../../utils/dependencies";
-import type { DraftAction } from "../../utils/drafts";
+import type { ActiveModIssue } from "../../utils/activeValidation";
+import { dependenciesForGameVersion } from "../../utils/dependencies";
+import { type DraftAction, draftActions } from "../../utils/drafts";
 import { formatDate, getModHue } from "../../utils/mods";
 import { tooltipPlacements } from "../../utils/tooltips";
 import { DraftBadge } from "../common/DraftBadge";
 import { EmptyState } from "../common/EmptyState";
+import { ExpandableSummary } from "../common/ExpandableSummary";
 import { ModImage } from "../common/ModImage";
+import { OfficialMarker } from "../common/OfficialMarker";
 import { PanelTitle } from "../common/PanelTitle";
 import { TagAssignments } from "../common/TagAssignments";
 import { TooltipIconButton } from "../common/TooltipIconButton";
@@ -28,19 +36,27 @@ import { TooltipIconButton } from "../common/TooltipIconButton";
 interface ModInfoPanelProps {
   active?: boolean;
   isSaved?: boolean;
-  locallyDetected?: boolean;
   isRevealingFolder?: boolean;
   isRefreshingMetadata?: boolean;
   removalCount?: number;
   removalDisabledReason?: string;
+  removalRequiresUnsubscribe?: boolean;
   pendingAction?: DraftAction;
+  pendingActions?: readonly DraftAction[];
+  subscriptionDisabledReason?: string;
+  validationIssues?: readonly ActiveModIssue[];
   missingDependencies?: readonly ModDependency[];
+  dependencyFixDisabledReason?: string;
   gameVersion?: string;
   mod?: Mod;
+  onAddModToLibrary?: (modId: string) => void;
   onRemoveModFromLibrary: (modId: string) => void;
   onRevealModFolder?: (modId: string) => void;
   onOpenWorkshop?: (workshopId: string) => void;
   onRefreshMetadata?: (modId: string) => void;
+  onFixDependencies?: (modId: string) => void;
+  onSubscribe?: (modId: string) => void;
+  onUnsubscribe?: (modId: string) => void;
   tags: ModTag[];
   onAssignTag: (modId: string, tagId: string, assigned: boolean) => void;
   onCreateTag: (name: string, modId: string) => void;
@@ -49,25 +65,39 @@ interface ModInfoPanelProps {
 export function ModInfoPanel({
   active = false,
   isSaved = true,
-  locallyDetected = false,
   isRevealingFolder = false,
   isRefreshingMetadata = false,
   removalCount = 1,
   removalDisabledReason,
+  removalRequiresUnsubscribe = false,
   pendingAction,
+  pendingActions,
+  subscriptionDisabledReason,
+  validationIssues = [],
   missingDependencies = [],
+  dependencyFixDisabledReason,
   gameVersion,
   mod,
+  onAddModToLibrary,
   onRemoveModFromLibrary,
   onRevealModFolder,
   onOpenWorkshop,
   onRefreshMetadata,
+  onFixDependencies,
+  onSubscribe,
+  onUnsubscribe,
   tags,
   onAssignTag,
   onCreateTag,
 }: ModInfoPanelProps) {
   const workshopId = mod ? getModWorkshopId(mod) : undefined;
   const missingPackages = new Set(missingDependencies.map((dependency) => dependency.packageId));
+  const dependencies = mod ? dependenciesForGameVersion(mod, gameVersion) : [];
+  const displayedPendingActions = pendingActions ?? (pendingAction ? [pendingAction] : []);
+  const pendingRemoval = displayedPendingActions.includes(draftActions.remove);
+  const otherValidationIssues = validationIssues.filter(
+    ({ code }) => code !== "missing-dependency",
+  );
 
   return (
     <aside className="panel info-panel" aria-label="Mod Info">
@@ -100,32 +130,93 @@ export function ModInfoPanel({
               refreshedAt={mod.metadataUpdatedAt}
               size={42}
             />
-            <span>{mod.source}</span>
+            <span className="mod-source">{mod.source}</span>
           </div>
 
           <div className="info-heading">
             <h2>{mod.name}</h2>
             <span
-              className={
-                mod.subscribed ? "mod-subscription-status active" : "mod-subscription-status saved"
-              }
+              className={`mod-subscription-status ${mod.subscribed ? "subscribed" : "not-subscribed"}`}
             >
-              {!isSaved
-                ? "Not saved"
-                : mod.subscribed
-                  ? locallyDetected
-                    ? "Installed"
-                    : "Subscribed"
-                  : locallyDetected
-                    ? "Not installed"
-                    : "Not subscribed"}
+              {mod.subscribed ? "Subscribe" : "Not subscribe"}
             </span>
           </div>
-          {active && <span className="active-pill">Active in RimWorld</span>}
-          {pendingAction && <DraftBadge action={pendingAction} />}
+          {isOfficialMod(mod) && <OfficialMarker />}
+          {displayedPendingActions.map((action) => (
+            <DraftBadge key={action} action={action} />
+          ))}
+
+          {isSaved && (
+            <div className="action-row">
+              {isWorkshopMod(mod) && (
+                <button
+                  className={mod.subscribed ? "danger-action" : "primary-action"}
+                  disabled={Boolean(subscriptionDisabledReason)}
+                  title={subscriptionDisabledReason}
+                  onClick={() => {
+                    if (!subscriptionDisabledReason) {
+                      if (mod.subscribed) {
+                        onUnsubscribe?.(mod.id);
+                      } else {
+                        onSubscribe?.(mod.id);
+                      }
+                    }
+                  }}
+                >
+                  {mod.subscribed ? (
+                    <CircleMinus size={16} aria-hidden />
+                  ) : (
+                    <CirclePlus size={16} aria-hidden />
+                  )}
+                  {mod.subscribed ? "Unsubscribe" : "Subscribe"}
+                </button>
+              )}
+              {pendingRemoval ? (
+                <button
+                  className="primary-action"
+                  disabled={!onAddModToLibrary || Boolean(removalDisabledReason)}
+                  title={
+                    removalDisabledReason ??
+                    "Keep this mod in Library; other pending actions are unchanged"
+                  }
+                  onClick={() => {
+                    if (!removalDisabledReason) {
+                      onAddModToLibrary?.(mod.id);
+                    }
+                  }}
+                >
+                  <CirclePlus size={16} aria-hidden />
+                  Add back
+                </button>
+              ) : (
+                <button
+                  className="danger-action"
+                  disabled={Boolean(removalDisabledReason)}
+                  title={
+                    removalDisabledReason ??
+                    (removalRequiresUnsubscribe
+                      ? removalCount > 1
+                        ? `Unsubscribe and remove ${removalCount} mods from library`
+                        : "Unsubscribe and remove from library"
+                      : removalCount > 1
+                        ? `Remove ${removalCount} mods from library`
+                        : "Remove from library")
+                  }
+                  onClick={() => {
+                    if (!removalDisabledReason) {
+                      onRemoveModFromLibrary(mod.id);
+                    }
+                  }}
+                >
+                  <Trash2 size={16} aria-hidden />
+                  Removed
+                </button>
+              )}
+            </div>
+          )}
 
           {missingDependencies.length > 0 && (
-            <div className="dependency-warning" role="alert">
+            <div className="dependency-warning" role="status" aria-label="Dependency status">
               <TriangleAlert size={18} aria-hidden />
               <div>
                 <strong>
@@ -140,13 +231,47 @@ export function ModInfoPanel({
                     .join(", ")}{" "}
                   in RimWorld.
                 </span>
+                {onFixDependencies && (
+                  <button
+                    type="button"
+                    className="dependency-fix-action"
+                    disabled={Boolean(dependencyFixDisabledReason)}
+                    title={dependencyFixDisabledReason}
+                    onClick={() => {
+                      if (!dependencyFixDisabledReason) {
+                        onFixDependencies(mod.id);
+                      }
+                    }}
+                  >
+                    <WandSparkles size={13} aria-hidden />
+                    Auto-fix dependencies
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {otherValidationIssues.length > 0 && (
+            <div className="validation-warning" role="status" aria-label="Active mod errors">
+              <TriangleAlert size={18} aria-hidden />
+              <div>
+                <strong>
+                  {otherValidationIssues.length === 1
+                    ? "Active mod error"
+                    : `${otherValidationIssues.length} active mod errors`}
+                </strong>
+                <ul>
+                  {otherValidationIssues.map((issue) => (
+                    <li key={issue.id}>{issue.message}</li>
+                  ))}
+                </ul>
               </div>
             </div>
           )}
 
           {isSaved && (
             <TagAssignments
-              key={mod.id}
+              key={`tags:${mod.id}`}
               tags={tags}
               assignedIds={mod.userTagIds ?? []}
               onToggle={(id, assigned) => {
@@ -158,18 +283,17 @@ export function ModInfoPanel({
             />
           )}
 
-          <p className="summary">{mod.summary}</p>
+          <ExpandableSummary key={`summary:${mod.id}`} summary={mod.summary} />
 
           <section className="dependency-section" aria-label="Mod requirements">
             <h3>
               <Package size={15} aria-hidden />
               Requirements
             </h3>
-            {mod.dependencies?.length ? (
+            {dependencies.length ? (
               <ul>
-                {mod.dependencies.map((dependency) => {
+                {dependencies.map((dependency) => {
                   const missing = missingPackages.has(dependency.packageId);
-                  const applies = dependencyAppliesToGameVersion(dependency, gameVersion);
                   return (
                     <li key={dependency.packageId} className={missing ? "missing" : undefined}>
                       <span>
@@ -179,7 +303,7 @@ export function ModInfoPanel({
                           <code>RimWorld {dependency.gameVersions.join(", ")}</code>
                         )}
                       </span>
-                      {active && applies && <em>{missing ? "Missing" : "Active"}</em>}
+                      {active && <em>{missing ? "Missing" : "Active"}</em>}
                     </li>
                   );
                 })}
@@ -188,26 +312,6 @@ export function ModInfoPanel({
               <p>No dependencies declared in About.xml.</p>
             )}
           </section>
-
-          {isSaved && !mod.subscribed ? (
-            <div className="action-row">
-              <button
-                className="danger-action"
-                disabled={Boolean(removalDisabledReason)}
-                title={removalDisabledReason}
-                onClick={() => {
-                  if (!removalDisabledReason && !mod.subscribed) {
-                    onRemoveModFromLibrary(mod.id);
-                  }
-                }}
-              >
-                <Trash2 size={16} aria-hidden />
-                {removalCount > 1
-                  ? `Remove ${removalCount} mods from library`
-                  : "Remove from library"}
-              </button>
-            </div>
-          ) : null}
 
           <dl className="metadata-list">
             <div>

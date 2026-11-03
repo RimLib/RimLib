@@ -22,6 +22,9 @@ function invoke<Channel extends IpcChannel>(
 const modStore: ModStoreApi = {
   openLogs: () => invoke(ipcChannels.openLogs),
   openDatabaseFolder: () => invoke(ipcChannels.openDatabaseFolder),
+  launchRimWorld: () => invoke(ipcChannels.launchRimWorld),
+  importModList: () => invoke(ipcChannels.importModList),
+  exportModList: (request) => invoke(ipcChannels.exportModList, request),
   revealModFolder: (id) => invoke(ipcChannels.revealModFolder, id),
   openWorkshopInBrowser: (id) => invoke(ipcChannels.openWorkshopInBrowser, id),
   load: () => invoke(ipcChannels.load),
@@ -32,8 +35,13 @@ const modStore: ModStoreApi = {
   chooseWorkshopModsPath: (defaultPath) => invoke(ipcChannels.chooseWorkshopModsPath, defaultPath),
   detectWorkshopModsPath: () => invoke(ipcChannels.detectWorkshopModsPath),
   validateWorkshopModsPath: (path) => invoke(ipcChannels.validateWorkshopModsPath, path),
+  getActiveModConfiguration: (settings) => invoke(ipcChannels.getActiveModConfiguration, settings),
+  getInstalledMods: (settings, forceRefresh) =>
+    invoke(ipcChannels.getInstalledMods, settings, forceRefresh),
   getActiveMods: (settings) => invoke(ipcChannels.getActiveMods, settings),
-  syncSubscribedMods: () => invoke(ipcChannels.syncSubscribedMods),
+  setActiveMods: (settings, packageIds, expectedPackageIds) =>
+    invoke(ipcChannels.setActiveMods, settings, packageIds, expectedPackageIds),
+  syncSubscribedMods: (mode) => invoke(ipcChannels.syncSubscribedMods, mode),
   refreshSubscriptions: () => invoke(ipcChannels.refreshSubscriptions),
   inspectWorkshopStatus: () => invoke(ipcChannels.inspectWorkshopStatus),
   getSteamStatus: () => invoke(ipcChannels.getSteamStatus),

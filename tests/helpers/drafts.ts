@@ -7,7 +7,7 @@ import {
   type DraftProgress,
 } from "../../src/renderer/src/utils/drafts";
 import { modSources } from "../../src/shared/domainConstants";
-import type { Mod, ModVault } from "../../src/shared/types";
+import type { AppSettings, Mod, ModVault } from "../../src/shared/types";
 import { requireValue } from "../../src/shared/validation";
 import { deleteLibraryModsExplicitly } from "../../src/shared/vault";
 import { vaultSchemaVersion } from "../../src/shared/vaultValidation";
@@ -43,6 +43,13 @@ export function draftHarness(mods = [draftMod("1", true), draftMod("2"), draftMo
   };
   const events: string[] = [];
   const completed: string[] = [];
+  const completedChanges: { id: string; action: DraftChange["action"] }[] = [];
+  const activeWrites: {
+    settings: AppSettings | undefined;
+    packageIds: readonly string[];
+    expectedPackageIds: readonly string[];
+  }[] = [];
+  let activeOrderCompletions = 0;
   const progress: DraftProgress[] = [];
   const failures = new Set<string>();
   const store: Parameters<typeof applyDraftChanges>[1] = {
@@ -86,6 +93,15 @@ export function draftHarness(mods = [draftMod("1", true), draftMod("2"), draftMo
         failures: failed ? ["Simulated Steam failure"] : [],
       };
     },
+    setActiveMods: async (settings, packageIds, expectedPackageIds) => {
+      events.push(`active:${packageIds.join(",")}`);
+      activeWrites.push({
+        settings,
+        packageIds: [...packageIds],
+        expectedPackageIds: [...expectedPackageIds],
+      });
+      return { packageIds };
+    },
     deleteLibraryMods: async (ids) => {
       events.push(`delete:${ids.join(",")}`);
       vault = deleteLibraryModsExplicitly(vault, ids);
@@ -100,8 +116,12 @@ export function draftHarness(mods = [draftMod("1", true), draftMod("2"), draftMo
       vault = value;
     },
     adoptActive: () => undefined,
-    complete: (id) => {
+    complete: (id, action) => {
       completed.push(id);
+      completedChanges.push({ id, action });
+    },
+    completeActiveOrder: () => {
+      activeOrderCompletions++;
     },
   };
   const changes: DraftChange[] = mods.map((mod, index) => ({
@@ -119,6 +139,9 @@ export function draftHarness(mods = [draftMod("1", true), draftMod("2"), draftMo
     changes,
     events,
     completed,
+    completedChanges,
+    activeWrites,
+    activeOrderCompletions: () => activeOrderCompletions,
     progress,
     failures,
     vault: () => vault,

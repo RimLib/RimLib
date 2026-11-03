@@ -1,5 +1,6 @@
 @layer components {
   .search-scope-box:focus-within,
+  .tag-filter-box:focus-within,
   .sort-box:focus-within {
     @apply border-[#73a8d8];
   }
@@ -20,7 +21,8 @@
     @apply min-w-0 truncate;
   }
 
-  .search-scope-box option {
+  .search-scope-box option,
+  .tag-filter-box option {
     @apply bg-[#0f141b] text-[#e8edf2];
   }
 
@@ -89,11 +91,20 @@
   }
 
   .tag-manager-row {
-    @apply grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_34px_34px] items-center gap-2 border-b border-[#303a45] px-1.5 py-1.5;
+    @apply grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_auto_34px_34px] items-center gap-2 border-b border-[#303a45] px-1.5 py-1.5;
   }
 
   .tag-manager-row:last-child {
     @apply border-b-0;
+  }
+
+  .tag-add-active-action {
+    @apply min-h-8 shrink-0 px-2 text-[11px] whitespace-nowrap;
+  }
+
+  .tag-add-active-count {
+    @apply inline-flex min-w-5 items-center justify-center rounded bg-[#10161d] px-1 text-[10px] text-[#aeb9c7];
+    font-variant-numeric: tabular-nums;
   }
 
   .color-field {

@@ -1,14 +1,13 @@
 import { XMLParser } from "fast-xml-parser";
 import { SyntaxValidator } from "fast-xml-validator";
 
-import { bytesPerMiB } from "../shared/limits";
+import { xmlLimits } from "../shared/limits";
 import { isRecord } from "../shared/validation";
 
-const maxXmlSize = 10 * bytesPerMiB;
 const xmlNodeKeys = Object.freeze({ comment: "#comment", text: "#text", listItem: "li" });
 
 export function parseXml(text: string): Record<string, unknown> {
-  if (text.length > maxXmlSize || /<!DOCTYPE|<!ENTITY/i.test(text)) {
+  if (text.length > xmlLimits.maxFileBytes || /<!DOCTYPE|<!ENTITY/i.test(text)) {
     throw new Error("Unsupported XML document.");
   }
   try {

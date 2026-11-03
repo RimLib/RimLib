@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,7 @@ import { parseVdf, readAboutXml, type WorkshopFolderDiscovery } from "../src/mai
 import { VaultStore } from "../src/main/vaultStore";
 import { subscriptionPanels } from "../src/renderer/src/utils/library";
 import { steamStatusSources, subscriptionCommands } from "../src/shared/domainConstants";
+import { officialContentImageUrl } from "../src/shared/officialContent";
 import type { Mod, ModVault, SteamImportResult, SteamOperationProgress } from "../src/shared/types";
 import { requireValue } from "../src/shared/validation";
 import { deleteLibraryModsExplicitly, normalizeVault, serializeVault } from "../src/shared/vault";
@@ -92,7 +93,7 @@ void test("local metadata uses package and author from About.xml, case-insensiti
   }
 });
 
-void test("local metadata reads and deduplicates declared dependencies, including version-specific entries", async () => {
+void test("local metadata keeps base dependencies and version replacements distinct", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rimworld-dependencies-"));
   try {
     await mkdir(join(directory, "About"));
@@ -109,13 +110,24 @@ void test("local metadata reads and deduplicates declared dependencies, includin
             <li><packageId>author.framework</packageId><displayName>Framework</displayName></li>
             <li><packageId>author.library</packageId><displayName>Library</displayName></li>
           </v1.6>
+          <v1.5 />
         </modDependenciesByVersion>
       </ModMetaData>`,
     );
-    assert.deepEqual((await readAboutXml(directory)).dependencies, [
+    const metadata = await readAboutXml(directory);
+    assert.deepEqual(metadata.dependencies, [
       { packageId: "brrainz.harmony", displayName: "Harmony" },
-      { packageId: "author.framework", displayName: "Framework" },
-      { packageId: "author.library", displayName: "Library", gameVersions: ["1.6"] },
+      { packageId: "author.framework" },
+    ]);
+    assert.deepEqual(metadata.dependenciesByVersion, [
+      {
+        gameVersion: "v1.6",
+        dependencies: [
+          { packageId: "author.framework", displayName: "Framework" },
+          { packageId: "author.library", displayName: "Library" },
+        ],
+      },
+      { gameVersion: "v1.5", dependencies: [] },
     ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -172,6 +184,12 @@ void test("installed metadata finds Workshop, local mods and Core/DLC in Steam's
         join(requireValue(path), "About", "About.xml"),
         `<ModMetaData><name>${name}</name><modDependencies><li><packageId>brrainz.harmony</packageId></li></modDependencies><packageId>${packageId}</packageId></ModMetaData>`,
       );
+      if (packageId?.startsWith("ludeon.rimworld")) {
+        await writeFile(
+          join(requireValue(path), "About", "Preview.png"),
+          Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]),
+        );
+      }
     }
     await writeFile(
       join(steamapps, "appmanifest_294100.acf"),
@@ -190,7 +208,47 @@ void test("installed metadata finds Workshop, local mods and Core/DLC in Steam's
       { packageId: "brrainz.harmony" },
     ]);
     assert.equal(mods.find((mod) => mod.packageId === "ludeon.rimworld")?.workshopId, undefined);
+    assert.equal(mods.find((mod) => mod.packageId === "ludeon.rimworld")?.officialContent, true);
+    assert.equal(
+      mods.find((mod) => mod.packageId === "ludeon.rimworld")?.thumbnail,
+      officialContentImageUrl("ludeon.rimworld"),
+    );
+    assert.equal(
+      mods.find((mod) => mod.packageId === "ludeon.rimworld.royalty")?.thumbnail,
+      officialContentImageUrl("ludeon.rimworld.royalty"),
+    );
+    assert.equal(
+      mods.find((mod) => mod.packageId === "ludeon.rimworld.royalty")?.officialContent,
+      true,
+    );
     assert.equal(mods.find((mod) => mod.workshopId === "123")?.name, "Achtung!");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+void test("installed metadata records the folder modification time for an unsaved local mod", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rimworld-local-recency-"));
+  try {
+    const steamapps = join(directory, "steamapps");
+    const localMod = join(steamapps, "common", "RimWorld", "Mods", "FreshLocalMod");
+    await mkdir(join(localMod, "About"), { recursive: true });
+    await writeFile(
+      join(localMod, "About", "About.xml"),
+      "<ModMetaData><name>Fresh local mod</name><packageId>author.fresh</packageId></ModMetaData>",
+    );
+    await writeFile(
+      join(steamapps, "appmanifest_294100.acf"),
+      '"AppState" { "installdir" "RimWorld" }',
+    );
+    const modifiedAt = new Date("2026-08-19T14:25:00.000Z");
+    await utimes(localMod, modifiedAt, modifiedAt);
+
+    const installed = await new InstalledModIndex(0).read([directory]);
+    const row = requireValue(installed.find((entry) => entry.packageId === "author.fresh"));
+    assert.equal(row.workshopId, undefined);
+    assert.equal(row.localPath, localMod);
+    assert.equal(row.downloadedAt, modifiedAt.toISOString());
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -339,6 +397,287 @@ void test("sync rescans folders after metadata import rather than restoring stal
     assert.deepEqual(result.vault.localSteamState.observedIds, ["1", "3"]);
     assert.equal(requireValue(result.vault.mods[1]).notes, "Retained");
     assert.equal(result.vault.mods.length, 4);
+    assert.deepEqual(calls, []);
+  }));
+
+void test("light sync enriches only discovered mods without metadata and skips them once enriched", async () =>
+  setup(async (store, client, calls, create) => {
+    const enrichedAt = "2026-10-01T00:00:00.000Z";
+    await store.update((vault) => ({
+      ...vault,
+      mods: vault.mods.map((mod) => {
+        const personal = {
+          ...mod,
+          notes: `Keep mod ${requireValue(mod.workshopId)} notes`,
+          userTagIds: ["qol"],
+        };
+        return mod.workshopId === "3"
+          ? personal
+          : {
+              ...personal,
+              metadataUpdatedAt: enrichedAt,
+              thumbnail: `https://saved.invalid/${requireValue(mod.workshopId)}.png`,
+            };
+      }),
+      userTags: [{ id: "qol", name: "QoL", color: "#7fbf90" }],
+    }));
+    await client.unsubscribe("2");
+    await client.subscribe("4");
+    calls.length = 0;
+
+    const importedFolderIds: string[][] = [];
+    const service = create({
+      importMods: async (discovery) => {
+        const ids = discovery.folders.map(({ workshopId }) => workshopId);
+        importedFolderIds.push(ids);
+        return {
+          mods: ids.map((id) => ({
+            ...makeMod(id),
+            thumbnail: `https://fresh.invalid/${id}.png`,
+            screenshots: [`https://fresh.invalid/${id}.png`],
+            metadataUpdatedAt: enrichedAt,
+          })),
+          subscribedIds: ids,
+          discoveredIds: ids,
+          missingMetadataIds: [],
+          manifestPaths: [],
+          metadataAttemptedIds: ids,
+          steamLibraryPaths: [],
+          warnings: [],
+        } satisfies SteamImportResult;
+      },
+    });
+
+    const first = await service.syncSubscribedMods("light");
+
+    assert.deepEqual(importedFolderIds, [["3", "4"]]);
+    const removed = requireValue(first.vault.mods.find((mod) => mod.workshopId === "2"));
+    assert.equal(removed.subscribed, false);
+    assert.equal(removed.metadataUpdatedAt, enrichedAt);
+    assert.equal(removed.thumbnail, "https://saved.invalid/2.png");
+    assert.equal(removed.notes, "Keep mod 2 notes");
+    assert.deepEqual(removed.userTagIds, ["qol"]);
+    const refreshed = requireValue(first.vault.mods.find((mod) => mod.workshopId === "3"));
+    assert.equal(refreshed.thumbnail, "https://fresh.invalid/3.png");
+    assert.equal(refreshed.metadataUpdatedAt, enrichedAt);
+    assert.equal(refreshed.notes, "Keep mod 3 notes");
+    assert.deepEqual(refreshed.userTagIds, ["qol"]);
+    const added = requireValue(first.vault.mods.find((mod) => mod.workshopId === "4"));
+    assert.equal(added.thumbnail, "https://fresh.invalid/4.png");
+    assert.deepEqual(added.screenshots, ["https://fresh.invalid/4.png"]);
+    assert.equal(added.metadataUpdatedAt, enrichedAt);
+    assert.deepEqual(first.vault.localSteamState.observedIds, ["1", "3", "4"]);
+    assert.deepEqual(first.vault.localSteamState.metadataAttemptedIds, ["1", "2", "3", "4"]);
+    assert.deepEqual(calls, []);
+
+    const second = await service.syncSubscribedMods("light");
+
+    assert.deepEqual(importedFolderIds, [["3", "4"]]);
+    assert.equal(
+      requireValue(second.vault.mods.find((mod) => mod.workshopId === "4")).thumbnail,
+      "https://fresh.invalid/4.png",
+    );
+  }));
+
+void test("light sync records unavailable metadata attempts instead of retrying them forever", async () =>
+  setup(async (store, _client, _calls, create) => {
+    await store.update((vault) => ({
+      ...vault,
+      mods: vault.mods.map((mod) =>
+        mod.workshopId === "3" ? mod : { ...mod, metadataUpdatedAt: "2026-10-01T00:00:00.000Z" },
+      ),
+    }));
+    const importedFolderIds: string[][] = [];
+    const service = create({
+      importMods: async (discovery) => {
+        const ids = discovery.folders.map(({ workshopId }) => workshopId);
+        importedFolderIds.push(ids);
+        return {
+          mods: ids.map((id) => ({
+            ...makeMod(id),
+            tags: ["Steam", "Metadata needed"],
+          })),
+          subscribedIds: ids,
+          discoveredIds: ids,
+          manifestPaths: [],
+          metadataAttemptedIds: ids,
+          missingMetadataIds: ids,
+          steamLibraryPaths: [],
+          warnings: ["Metadata unavailable"],
+        } satisfies SteamImportResult;
+      },
+    });
+
+    await service.syncSubscribedMods("light");
+    const second = await service.syncSubscribedMods("light");
+
+    assert.deepEqual(importedFolderIds, [["3"]]);
+    assert.ok(second.vault.localSteamState.metadataAttemptedIds?.includes("3"));
+    assert.equal(
+      requireValue(second.vault.mods.find((mod) => mod.workshopId === "3")).metadataUpdatedAt,
+      undefined,
+    );
+  }));
+
+void test("light sync retries metadata batches that never completed", async () =>
+  setup(async (store, _client, _calls, create) => {
+    await store.update((vault) => ({
+      ...vault,
+      localSteamState: { ...vault.localSteamState, metadataAttemptedIds: ["1", "2"] },
+    }));
+    const importedFolderIds: string[][] = [];
+    const service = create({
+      importMods: async (discovery) => {
+        const ids = discovery.folders.map(({ workshopId }) => workshopId);
+        importedFolderIds.push(ids);
+        return {
+          mods: ids.map((id) => ({
+            ...makeMod(id),
+            tags: ["Steam", "Metadata needed"],
+          })),
+          subscribedIds: ids,
+          discoveredIds: ids,
+          manifestPaths: [],
+          metadataAttemptedIds: [],
+          missingMetadataIds: ids,
+          steamLibraryPaths: [],
+          warnings: ["Metadata request failed"],
+        } satisfies SteamImportResult;
+      },
+    });
+
+    await service.syncSubscribedMods("light");
+    const retried = await service.syncSubscribedMods("light");
+
+    assert.deepEqual(importedFolderIds, [["3"], ["3"]]);
+    assert.ok(!retried.vault.localSteamState.metadataAttemptedIds?.includes("3"));
+  }));
+
+void test("a successful per-mod metadata refresh satisfies a pending light retry", async () =>
+  setup(async (store, _client, _calls, create) => {
+    await store.update((vault) => ({
+      ...vault,
+      localSteamState: { ...vault.localSteamState, metadataAttemptedIds: ["1", "2"] },
+    }));
+    const importedFolderIds: string[][] = [];
+    const service = create({
+      importMods: async (discovery) => {
+        const ids = discovery.folders.map(({ workshopId }) => workshopId);
+        importedFolderIds.push(ids);
+        return {
+          mods: ids.map((id) => ({
+            ...makeMod(id),
+            tags: ["Steam", "Metadata needed"],
+          })),
+          subscribedIds: ids,
+          discoveredIds: ids,
+          manifestPaths: [],
+          metadataAttemptedIds: [],
+          missingMetadataIds: ids,
+          steamLibraryPaths: [],
+          warnings: ["Metadata request failed"],
+        } satisfies SteamImportResult;
+      },
+    });
+
+    await service.syncSubscribedMods("light");
+    await store.update((vault) => ({
+      ...vault,
+      mods: vault.mods.map((mod) =>
+        mod.workshopId === "3"
+          ? {
+              ...mod,
+              metadataUpdatedAt: "2026-10-01T00:00:00.000Z",
+              thumbnail: "https://fresh.invalid/3.png",
+            }
+          : mod,
+      ),
+    }));
+    await service.syncSubscribedMods("light");
+
+    assert.deepEqual(importedFolderIds, [["3"]]);
+  }));
+
+void test("full sync imports every discovered folder even when all saved metadata is current", async () =>
+  setup(async (store, _client, _calls, create) => {
+    await store.update((vault) => ({
+      ...vault,
+      mods: vault.mods.map((mod) => ({
+        ...mod,
+        metadataUpdatedAt: "2026-10-01T00:00:00.000Z",
+      })),
+    }));
+    const importedFolderIds: string[][] = [];
+    const service = create({
+      importMods: async (discovery) => {
+        const ids = discovery.folders.map(({ workshopId }) => workshopId);
+        importedFolderIds.push(ids);
+        return {
+          mods: ids.map((id) => makeMod(id)),
+          subscribedIds: ids,
+          discoveredIds: ids,
+          missingMetadataIds: [],
+          manifestPaths: [],
+          steamLibraryPaths: [],
+          warnings: [],
+        } satisfies SteamImportResult;
+      },
+    });
+
+    await service.syncSubscribedMods("full");
+
+    assert.deepEqual(importedFolderIds, [["1", "2", "3"]]);
+  }));
+
+void test("sync preserves cached metadata and returns deduplicated metadata warning details", async () =>
+  setup(async (store, client, calls, create) => {
+    await store.update((vault) => ({
+      ...vault,
+      mods: vault.mods.map((mod) =>
+        mod.id === "steam-2"
+          ? {
+              ...mod,
+              notes: "Keep this note",
+              tags: ["Saved tag"],
+              screenshots: ["saved-preview"],
+            }
+          : mod,
+      ),
+    }));
+    const original = requireValue((await store.load()).mods.find((mod) => mod.id === "steam-2"));
+    const discoveryWarning = "Steam library unavailable: old drive";
+    const metadataWarning =
+      "Workshop 2: Steam did not return metadata for this item. Saved information was preserved.";
+    const placeholder: Mod = {
+      ...makeMod("2"),
+      name: "Workshop item 2",
+      author: "Unknown author",
+      summary: "Steam Workshop metadata imported.",
+      tags: ["Steam", "Metadata needed"],
+      screenshots: [],
+    };
+    const service = create({
+      discover: async () => ({
+        ...discovered(client.subscribedIds()),
+        warnings: [discoveryWarning, discoveryWarning],
+      }),
+      importMods: async () => ({
+        mods: [placeholder],
+        subscribedIds: client.subscribedIds(),
+        discoveredIds: client.subscribedIds(),
+        missingMetadataIds: ["2"],
+        manifestPaths: [],
+        steamLibraryPaths: [],
+        warnings: [discoveryWarning, metadataWarning, metadataWarning],
+      }),
+    });
+
+    const result = await service.syncSubscribedMods();
+
+    assert.deepEqual(result.warnings, [discoveryWarning, metadataWarning]);
+    assert.deepEqual(result.folderWarnings, [discoveryWarning]);
+    assert.ok(!result.warnings.some((warning) => warning.startsWith("Some Workshop metadata")));
+    assert.deepEqual(requireValue(result.vault.mods.find((mod) => mod.id === "steam-2")), original);
     assert.deepEqual(calls, []);
   }));
 

@@ -11,7 +11,13 @@ import {
   useWorkspaceStore,
   WorkspaceStoreProvider,
 } from "../src/renderer/src/stores/WorkspaceStoreProvider";
-import { modPanelModes, modSorts, searchScopes } from "../src/renderer/src/utils/uiConstants";
+import {
+  modFilters,
+  modPanelModes,
+  modSorts,
+  modTagFilters,
+  searchScopes,
+} from "../src/renderer/src/utils/uiConstants";
 
 const library = modPanelModes.unsubscribed;
 const workshop = modPanelModes.subscribed;
@@ -24,8 +30,20 @@ void test("workspace stores have independent session defaults and expose only ob
   const initial = first.getState();
   assert.equal(first.getInitialState(), initial);
   assert.deepEqual(initial.views, {
-    unsubscribed: { search: "", searchScope: searchScopes.all, sort: modSorts.newest },
-    subscribed: { search: "", searchScope: searchScopes.all, sort: modSorts.active },
+    unsubscribed: {
+      search: "",
+      searchScope: searchScopes.all,
+      sort: modSorts.newest,
+      filter: modFilters.all,
+      tagFilter: modTagFilters.all,
+    },
+    subscribed: {
+      search: "",
+      searchScope: searchScopes.all,
+      sort: modSorts.loadOrder,
+      filter: modFilters.all,
+      tagFilter: modTagFilters.all,
+    },
   });
   assert.equal(initial.focusedModId, undefined);
   assert.deepEqual(initial.selection, { ids: [] });
@@ -56,15 +74,118 @@ void test("panel actions preserve other panel references, selection and stable a
   actions.setSearch(library, "Camera");
   actions.setSort(library, modSorts.oldest);
   actions.setSearchScope(library, searchScopes.tags);
+  actions.setFilter(library, modFilters.invalid);
+  actions.setTagFilter(library, "tag-qol");
   assert.deepEqual(store.getState().views.unsubscribed, {
     search: "Camera",
     searchScope: searchScopes.tags,
     sort: modSorts.oldest,
+    filter: modFilters.invalid,
+    tagFilter: "tag-qol",
   });
   assert.equal(store.getState().views.subscribed, initial.views.subscribed);
   assert.equal(store.getState().selection, initial.selection);
   assert.equal(store.getState().actions, actions);
   assert.equal(initial.views.unsubscribed.search, "");
+});
+
+void test("tag filters change independently per panel and reset with each workspace session", () => {
+  const first = createWorkspaceStore();
+  const second = createWorkspaceStore();
+  const { actions } = first.getState();
+  const originalActiveView = first.getState().views.subscribed;
+
+  actions.setTagFilter(library, "tag-combat");
+  assert.equal(first.getState().views.unsubscribed.tagFilter, "tag-combat");
+  assert.equal(first.getState().views.subscribed, originalActiveView);
+  assert.equal(second.getState().views.unsubscribed.tagFilter, modTagFilters.all);
+
+  const libraryView = first.getState().views.unsubscribed;
+  const state = first.getState();
+  actions.setTagFilter(library, "tag-combat");
+  assert.equal(first.getState(), state);
+  assert.equal(first.getState().views.unsubscribed, libraryView);
+
+  actions.setTagFilter(workshop, modTagFilters.untagged);
+  assert.equal(first.getState().views.unsubscribed, libraryView);
+  assert.equal(first.getState().views.subscribed.tagFilter, modTagFilters.untagged);
+
+  const reopened = createWorkspaceStore();
+  assert.equal(reopened.getState().views.unsubscribed.tagFilter, modTagFilters.all);
+  assert.equal(reopened.getState().views.subscribed.tagFilter, modTagFilters.all);
+});
+
+void test("status filters route atomically to their target panel and remain mutually exclusive", () => {
+  const store = createWorkspaceStore();
+  const { actions } = store.getState();
+  actions.setSearch(library, "Library query");
+  actions.setSearch(workshop, "Active query");
+  actions.setSort(library, modSorts.oldest);
+  actions.openContext(workshop, rows, "a", point);
+
+  let calls = 0;
+  const stop = store.subscribe(() => {
+    calls++;
+  });
+
+  const beforeActivation = store.getState();
+  actions.setModStatusFilter(modFilters.pendingActivation);
+  assert.equal(calls, 1);
+  assert.equal(store.getState().views.unsubscribed, beforeActivation.views.unsubscribed);
+  assert.notEqual(store.getState().views.subscribed, beforeActivation.views.subscribed);
+  assert.equal(store.getState().views.unsubscribed.filter, modFilters.all);
+  assert.equal(store.getState().views.subscribed.filter, modFilters.pendingActivation);
+  assert.equal(store.getState().views.unsubscribed.search, "Library query");
+  assert.equal(store.getState().views.subscribed.search, "Active query");
+  assert.equal(store.getState().views.unsubscribed.sort, modSorts.oldest);
+  assert.equal(store.getState().contextMenu, undefined);
+
+  const activationState = store.getState();
+  actions.setModStatusFilter(modFilters.pendingActivation);
+  assert.equal(calls, 1);
+  assert.equal(store.getState(), activationState);
+
+  actions.setModStatusFilter(modFilters.invalid);
+  assert.equal(calls, 2);
+  assert.equal(store.getState().views.unsubscribed, activationState.views.unsubscribed);
+  assert.equal(store.getState().views.unsubscribed.filter, modFilters.all);
+  assert.equal(store.getState().views.subscribed.filter, modFilters.invalid);
+
+  const invalidState = store.getState();
+  actions.setModStatusFilter(modFilters.pendingDeactivation);
+  assert.equal(calls, 3);
+  assert.notEqual(store.getState().views.unsubscribed, invalidState.views.unsubscribed);
+  assert.notEqual(store.getState().views.subscribed, invalidState.views.subscribed);
+  assert.equal(store.getState().views.unsubscribed.filter, modFilters.pendingDeactivation);
+  assert.equal(store.getState().views.subscribed.filter, modFilters.all);
+
+  const deactivationState = store.getState();
+  actions.setModStatusFilter(modFilters.all);
+  assert.equal(calls, 4);
+  assert.equal(store.getState().views.subscribed, deactivationState.views.subscribed);
+  assert.equal(store.getState().views.unsubscribed.filter, modFilters.all);
+  assert.equal(store.getState().views.subscribed.filter, modFilters.all);
+
+  const allState = store.getState();
+  actions.setModStatusFilter(modFilters.all);
+  assert.equal(calls, 4);
+  assert.equal(store.getState(), allState);
+  stop();
+});
+
+void test("status filters are scoped to one workspace session", () => {
+  const first = createWorkspaceStore();
+  const second = createWorkspaceStore();
+
+  first.getState().actions.setModStatusFilter(modFilters.pendingDeactivation);
+  assert.equal(first.getState().views.unsubscribed.filter, modFilters.pendingDeactivation);
+  assert.equal(first.getState().views.subscribed.filter, modFilters.all);
+  assert.equal(second.getState().views.unsubscribed.filter, modFilters.all);
+  assert.equal(second.getState().views.subscribed.filter, modFilters.all);
+
+  const reopened = createWorkspaceStore();
+  assert.equal(reopened.getState().views.unsubscribed.filter, modFilters.all);
+  assert.equal(reopened.getState().views.subscribed.filter, modFilters.all);
 });
 
 void test("unchanged workspace actions do not notify subscribers and unsubscription stops delivery", () => {
@@ -76,8 +197,11 @@ void test("unchanged workspace actions do not notify subscribers and unsubscript
   });
   const initial = store.getState();
   actions.setSearch(library, "");
-  actions.setSort(workshop, modSorts.active);
+  actions.setSort(workshop, modSorts.loadOrder);
   actions.setSearchScope(workshop, searchScopes.all);
+  actions.setFilter(workshop, modFilters.all);
+  actions.setTagFilter(workshop, modTagFilters.all);
+  actions.setModStatusFilter(modFilters.all);
   actions.closeContext();
   actions.reconcile({ unsubscribed: [], subscribed: [] });
   assert.equal(calls, 0);
@@ -105,8 +229,20 @@ void test("changing a search scope updates one panel without clearing other cont
   stop();
   assert.equal(transitions.length, 1);
   assert.deepEqual(store.getState().views, {
-    unsubscribed: { search: "one", searchScope: searchScopes.tags, sort: modSorts.oldest },
-    subscribed: { search: "two", searchScope: searchScopes.all, sort: modSorts.active },
+    unsubscribed: {
+      search: "one",
+      searchScope: searchScopes.tags,
+      sort: modSorts.oldest,
+      filter: modFilters.all,
+      tagFilter: modTagFilters.all,
+    },
+    subscribed: {
+      search: "two",
+      searchScope: searchScopes.all,
+      sort: modSorts.loadOrder,
+      filter: modFilters.all,
+      tagFilter: modTagFilters.all,
+    },
   });
   assert.equal(store.getState().contextMenu, undefined);
   assert.deepEqual(store.getState().selection.ids, ["a"]);
@@ -253,7 +389,7 @@ void test("React workspace bindings require a provider and create a fresh scoped
         <Probe />
       </WorkspaceStoreProvider>,
     ),
-    "<span>active</span>",
+    "<span>load-order</span>",
   );
   assert.equal(
     renderToStaticMarkup(
@@ -261,7 +397,7 @@ void test("React workspace bindings require a provider and create a fresh scoped
         <Probe />
       </WorkspaceStoreProvider>,
     ),
-    "<span>active</span>",
+    "<span>load-order</span>",
   );
   assert.equal(states.length, 2);
   assert.notEqual(states[0]?.selection, states[1]?.selection);

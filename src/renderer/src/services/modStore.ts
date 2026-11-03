@@ -35,6 +35,10 @@ function getBrowserStore(): ModStoreApi {
     openLogs: nativeOnly,
     openDatabaseFolder: () =>
       unavailable("Opening the database folder requires the Electron desktop app."),
+    launchRimWorld: () =>
+      unavailable("Launching RimWorld requires the Electron desktop app and Steam."),
+    importModList: () => unavailable("Importing XML mod lists requires the Electron desktop app."),
+    exportModList: () => unavailable("Exporting XML mod lists requires the Electron desktop app."),
     revealModFolder: () => unavailable("Revealing a mod folder requires the Electron desktop app."),
     openWorkshopInBrowser: (id) =>
       browserAction(() => {
@@ -69,8 +73,12 @@ function getBrowserStore(): ModStoreApi {
     detectWorkshopModsPath: () => Promise.resolve(null),
     validateWorkshopModsPath: () =>
       unavailable("Workshop folder selection requires the Electron desktop app."),
+    getActiveModConfiguration: () =>
+      Promise.resolve({ packageIds: [], error: "Active mods require the Electron desktop app." }),
+    getInstalledMods: () => Promise.resolve([]),
     getActiveMods: () =>
       Promise.resolve({ packageIds: [], error: "Active mods require the Electron desktop app." }),
+    setActiveMods: () => unavailable("Changing active mods requires the Electron desktop app."),
     getSteamStatus: () =>
       Promise.resolve({
         running: false,

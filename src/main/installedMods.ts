@@ -1,12 +1,14 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { mapWithConcurrency, withReadTimeout } from "../shared/async";
 import { steamLimits } from "../shared/limits";
-import { normalizePackageId } from "../shared/packages";
+import { getOfficialContent } from "../shared/officialContent";
+import { isUsablePackageId } from "../shared/packages";
 import { RIMWORLD_APP_ID } from "../shared/steam";
 import type { AppSettings, InstalledModMetadata } from "../shared/types";
 import { log } from "./logging";
+import { type ApprovedOfficialContentImage, officialContentImages } from "./officialContentImages";
 import { getActiveMods } from "./rimWorldConfig";
 import {
   discoverWorkshopFolders,
@@ -25,21 +27,61 @@ async function directories(path: string): Promise<string[]> {
   }
 }
 
+interface InstalledModCache {
+  token: symbol;
+  key: string;
+  expires: number;
+  pending: Promise<InstalledModMetadata[]>;
+  settled: boolean;
+  queuedRefresh?: Promise<InstalledModMetadata[]>;
+}
+
 export class InstalledModIndex {
-  private cached?: { key: string; expires: number; pending: Promise<InstalledModMetadata[]> };
+  private cached?: InstalledModCache;
 
   constructor(private cacheDuration: number = steamLimits.installedMetadataCacheMs) {}
 
-  read(libraries: string[], workshopModsPath?: string): Promise<InstalledModMetadata[]> {
+  read(
+    libraries: string[],
+    workshopModsPath?: string,
+    forceRefresh = false,
+  ): Promise<InstalledModMetadata[]> {
     const key = JSON.stringify([libraries, workshopModsPath]);
     if (this.cached?.key === key && this.cached.expires > Date.now()) {
-      return this.cached.pending;
+      if (!forceRefresh) {
+        return this.cached.pending;
+      }
+      if (!this.cached.settled) {
+        const current = this.cached;
+        current.queuedRefresh ??= current.pending.then(
+          (installed) =>
+            this.cached === current ? this.read(libraries, workshopModsPath, true) : installed,
+          (error: unknown) => {
+            if (this.cached === current || !this.cached) {
+              return this.read(libraries, workshopModsPath, true);
+            }
+            throw error;
+          },
+        );
+        return current.queuedRefresh;
+      }
     }
-    const pending = this.scan(libraries, workshopModsPath);
-    const cache = { key, expires: Infinity, pending };
+    if (this.cached && this.cached.key !== key) {
+      officialContentImages.replace([]);
+    }
+    const token = Symbol("installed-mod-scan");
+    const pending = this.scan(libraries, workshopModsPath).then(({ installed, previews }) => {
+      // A slow scan for an old path must not replace image approvals from the current path.
+      if (this.cached?.token === token) {
+        officialContentImages.replace(previews);
+      }
+      return installed;
+    });
+    const cache: InstalledModCache = { token, key, expires: Infinity, pending, settled: false };
     this.cached = cache;
     void pending.then(
       () => {
+        cache.settled = true;
         cache.expires = Date.now() + this.cacheDuration;
       },
       () => {
@@ -54,20 +96,23 @@ export class InstalledModIndex {
   private async scan(
     libraries: string[],
     workshopModsPath?: string,
-  ): Promise<InstalledModMetadata[]> {
+  ): Promise<{
+    installed: InstalledModMetadata[];
+    previews: ApprovedOfficialContentImage[];
+  }> {
     const start = Date.now();
-    const paths = new Map<string, string | undefined>();
+    const paths = new Map<string, { officialContentCandidate: boolean; workshopId?: string }>();
     for (const game of await findRimWorldInstallations(libraries)) {
       const roots = [game, ...(await directories(game)).filter((path) => path.endsWith(".app"))];
       for (const root of roots) {
-        for (const folder of [
-          join(root, "Data"),
-          join(root, "Mods"),
-          join(root, "Contents", "Resources", "Data"),
-          join(root, "Contents", "Resources", "Mods"),
-        ]) {
+        for (const folder of [join(root, "Data"), join(root, "Contents", "Resources", "Data")]) {
           for (const path of await directories(folder)) {
-            paths.set(path, undefined);
+            paths.set(path, { officialContentCandidate: true });
+          }
+        }
+        for (const folder of [join(root, "Mods"), join(root, "Contents", "Resources", "Mods")]) {
+          for (const path of await directories(folder)) {
+            paths.set(path, { officialContentCandidate: false });
           }
         }
       }
@@ -75,7 +120,10 @@ export class InstalledModIndex {
     if (workshopModsPath) {
       for (const folder of (await discoverWorkshopFolders(libraries, { workshopModsPath }))
         .folders) {
-        paths.set(folder.path, folder.workshopId);
+        paths.set(folder.path, {
+          officialContentCandidate: false,
+          workshopId: folder.workshopId,
+        });
       }
     } else {
       for (const library of libraries) {
@@ -83,7 +131,7 @@ export class InstalledModIndex {
         for (const path of await directories(folder)) {
           const id = basename(path);
           if (/^\d+$/.test(id)) {
-            paths.set(path, id);
+            paths.set(path, { officialContentCandidate: false, workshopId: id });
           }
         }
       }
@@ -93,36 +141,81 @@ export class InstalledModIndex {
     const read = await mapWithConcurrency(
       entries,
       steamLimits.localMetadataReadConcurrency,
-      async ([localPath, workshopId]): Promise<InstalledModMetadata | undefined> => {
+      async ([localPath, source]): Promise<{
+        metadata?: InstalledModMetadata;
+        preview?: ApprovedOfficialContentImage;
+      }> => {
         try {
           const about = await readAboutXml(localPath);
-          if (!about.packageId) {
-            return undefined;
+          const downloadedAt = (await stat(localPath).catch(() => undefined))?.mtime.toISOString();
+          if (!isUsablePackageId(about.packageId)) {
+            log.warn("rimworld.installed-mod-metadata.missing-package-id", {
+              path: localPath,
+              workshopId: source.workshopId,
+              officialContentCandidate: source.officialContentCandidate,
+            });
+            return {};
           }
+          const official = getOfficialContent(about.packageId);
+          const officialContent =
+            source.officialContentCandidate &&
+            basename(localPath).toLowerCase() === official?.folderName.toLowerCase();
+          const preview = source.officialContentCandidate
+            ? await officialContentImages.inspect(about.packageId, localPath)
+            : undefined;
           return {
-            ...about,
-            packageId: about.packageId,
-            localPath,
-            workshopId,
-            name: about.name ?? (workshopId ? undefined : basename(localPath)),
+            metadata: {
+              ...about,
+              packageId: about.packageId,
+              localPath,
+              ...(downloadedAt ? { downloadedAt } : {}),
+              workshopId: source.workshopId,
+              ...(officialContent ? { officialContent: true } : {}),
+              name: about.name ?? (source.workshopId ? undefined : basename(localPath)),
+              thumbnail: preview?.url,
+            },
+            preview,
           };
-        } catch {
-          return undefined;
+        } catch (error) {
+          log.warn("rimworld.installed-mod-metadata.failed", {
+            path: localPath,
+            workshopId: source.workshopId,
+            officialContentCandidate: source.officialContentCandidate,
+            error,
+          });
+          return {};
         }
       },
     );
-    const installed = read.filter((entry): entry is InstalledModMetadata => Boolean(entry));
+    const previews = read.flatMap((result) => (result.preview ? [result.preview] : []));
+    const installed = read.flatMap((result) => (result.metadata ? [result.metadata] : []));
     log.debug("rimworld.installed-mods.scanned", {
       libraryCount: libraries.length,
       folderCount: entries.length,
       identifiedCount: installed.length,
       durationMs: Date.now() - start,
     });
-    return installed;
+    return { installed, previews };
   }
 }
 
 const installedMods = new InstalledModIndex();
+
+const metadataTimeoutMessage =
+  "Reading installed mod metadata timed out. Check whether the Workshop drive is connected.";
+
+export async function getInstalledMods(
+  settings: AppSettings = {},
+  forceRefresh = false,
+  readMetadata = async () =>
+    installedMods.read(await findSteamLibraries(), settings.workshopModsPath, forceRefresh),
+): Promise<InstalledModMetadata[]> {
+  return withReadTimeout(
+    readMetadata(),
+    metadataTimeoutMessage,
+    steamLimits.activeMetadataTimeoutMs,
+  );
+}
 
 export async function getActiveModsView(
   settings: AppSettings = {},
@@ -133,16 +226,9 @@ export async function getActiveModsView(
   if (active.error) {
     return active;
   }
-  const packages = new Set(active.packageIds.map(normalizePackageId));
   try {
-    const metadata = await withReadTimeout(
-      readMetadata(),
-      "Reading installed mod metadata timed out. Check whether the Workshop drive is connected.",
-    );
-    return {
-      ...active,
-      installedMods: metadata.filter((mod) => packages.has(normalizePackageId(mod.packageId))),
-    };
+    const metadata = await withReadTimeout(readMetadata(), metadataTimeoutMessage);
+    return { ...active, installedMods: metadata };
   } catch (error) {
     log.warn("rimworld.installed-mods.unavailable", {
       workshopModsPath: settings.workshopModsPath,

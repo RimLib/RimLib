@@ -11,9 +11,20 @@ interface TagDialogsProps {
   mods: Mod[];
   tags: ModTag[];
   disabled: boolean;
+  inactiveCountByTagId: ReadonlyMap<string, number>;
+  addToActiveDisabledReason?: string;
+  onAddTagToActive: (tagId: string) => void;
 }
 
-export function TagDialogs({ workflow, mods, tags, disabled }: TagDialogsProps) {
+export function TagDialogs({
+  workflow,
+  mods,
+  tags,
+  disabled,
+  inactiveCountByTagId,
+  addToActiveDisabledReason,
+  onAddTagToActive,
+}: TagDialogsProps) {
   const { dialog, dispatch } = workflow;
   const operation = bulkTagOperation(dialog);
   const selectedMods: Mod[] = [];
@@ -35,6 +46,12 @@ export function TagDialogs({ workflow, mods, tags, disabled }: TagDialogsProps) 
       {dialog.kind === tagDialogKinds.manager && (
         <ManageTagsModal
           tags={tags}
+          inactiveCountByTagId={inactiveCountByTagId}
+          addToActiveDisabledReason={addToActiveDisabledReason}
+          onAddTagToActive={(tagId) => {
+            close();
+            onAddTagToActive(tagId);
+          }}
           onClose={close}
           onCreate={() => {
             dispatch({ type: tagDialogActions.create, initialName: "" });

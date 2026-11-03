@@ -9,8 +9,9 @@ import { ModInfoPanel } from "../src/renderer/src/components/panels/ModInfoPanel
 import { ModsPanelView as ModsPanel } from "../src/renderer/src/components/panels/ModsPanel";
 import { SubscribedModsPanelView as SubscribedModsPanel } from "../src/renderer/src/components/panels/SubscribedModsPanel";
 import { persistSettings } from "../src/renderer/src/services/settings";
-import { filterLibrary } from "../src/renderer/src/utils/library";
-import { searchScopes } from "../src/renderer/src/utils/uiConstants";
+import { draftActions } from "../src/renderer/src/utils/drafts";
+import { filterLibrary, filterModsByTag } from "../src/renderer/src/utils/library";
+import { modTagFilters, searchScopes } from "../src/renderer/src/utils/uiConstants";
 import { mergePortableMod, parsePortableMod, toPortableMod } from "../src/shared/cloudVault";
 import { assignTagsToMods, tagNameExists } from "../src/shared/tags";
 import type { FirebaseSyncSettings, Mod, ModVault } from "../src/shared/types";
@@ -357,6 +358,40 @@ void test("search scopes title, author, description and tags without mutating th
   assert.equal(JSON.stringify(next.mods), before);
 });
 
+void test("tag filters select one personal tag or untagged mods and compose with search", () => {
+  const mods = [
+    ...normalizeVault(savedVault).mods,
+    { ...makeMod("3", false), userTagIds: [] },
+    { ...makeMod("4", false), userTagIds: undefined },
+  ];
+  const before = JSON.stringify(mods);
+
+  assert.deepEqual(
+    filterModsByTag(mods, modTagFilters.all).map((mod) => mod.id),
+    ["steam-1", "steam-2", "steam-3", "steam-4"],
+  );
+  assert.deepEqual(
+    filterModsByTag(mods, "qol").map((mod) => mod.id),
+    ["steam-1"],
+  );
+  assert.deepEqual(
+    filterModsByTag(mods, modTagFilters.untagged).map((mod) => mod.id),
+    ["steam-3", "steam-4"],
+  );
+  assert.deepEqual(filterModsByTag(mods, "missing-tag"), []);
+  assert.deepEqual(
+    filterLibrary(
+      filterModsByTag(mods, "sw"),
+      "2",
+      searchScopes.title,
+      "newest",
+      savedVault.userTags,
+    ).map((mod) => mod.id),
+    ["steam-2"],
+  );
+  assert.equal(JSON.stringify(mods), before);
+});
+
 void test("ordinary omission preserves tags; explicit tag deletion clears saved mod assignments", () => {
   const original = deleteLibraryModsExplicitly(
     mergeSteamSync(normalizeVault(savedVault), {
@@ -383,7 +418,7 @@ void test("ordinary omission preserves tags; explicit tag deletion clears saved 
   assert.deepEqual(normalizeVault(deleted).userTags, deleted.userTags);
 });
 
-void test("library shows scoped search and subscription controls; info supports multiple assignments and inline creation", () => {
+void test("Library panel keeps scoped search while subscription controls live in Mod Info", () => {
   const next = normalizeVault(savedVault);
   const html = renderToStaticMarkup(
     <ModsPanel
@@ -394,28 +429,38 @@ void test("library shows scoped search and subscription controls; info supports 
       search=""
       searchScope="all"
       sort="newest"
+      tagFilter={modTagFilters.untagged}
       activeIds={new Set()}
       activeOrder={new Map()}
       onSearch={noop}
       onSearchScope={noop}
       onSort={noop}
+      onTagFilter={noop}
       onSelect={noop}
       onSubscribe={noop}
       onUnsubscribe={noop}
     />,
   );
+  assert.match(html, /<h2[^>]*>Library<\/h2>/);
+  assert.match(html, /aria-label="Library mods"/);
   assert.match(html, /Search library mods by/);
   assert.match(html, />Description<\/option>/);
   assert.match(html, />Tags<\/option>/);
-  assert.doesNotMatch(html, /Filter library by tag/);
+  assert.match(html, /aria-label="Filter library mods by tag"/);
+  assert.match(html, />All tags<\/option>/);
+  assert.match(html, />QoL<\/option>/);
+  assert.match(html, />Star Wars<\/option>/);
+  assert.match(html, /<option[^>]*selected=""[^>]*>Untagged<\/option>/);
   assert.doesNotMatch(html, /Manage tags|Sync Steam subscriptions/);
-  assert.match(html, /Subscribe to Mod 1/);
-  assert.match(html, /Subscribe to Mod 2/);
+  assert.doesNotMatch(html, /Subscribe to Mod 1|Subscribe to Mod 2|Unsubscribe from/);
+  assert.match(html, /Double-click to stage activation/);
   assert.doesNotMatch(html, /Steam category|Create modlist/);
   const info = renderToStaticMarkup(
     <ModInfoPanel
       mod={next.mods[0]}
       tags={requireValue(next.userTags)}
+      onSubscribe={noop}
+      onUnsubscribe={noop}
       onRemoveModFromLibrary={noop}
       onAssignTag={noop}
       onCreateTag={noop}
@@ -423,10 +468,57 @@ void test("library shows scoped search and subscription controls; info supports 
   );
   assert.equal((info.match(/type="checkbox"/g) ?? []).length, 2);
   assert.equal((info.match(/checked=""/g) ?? []).length, 2);
+  assert.match(info, />Subscribe<\/span>/);
+  assert.match(info, />Unsubscribe<\/button>/);
+  assert.match(info, />Removed<\/button>/);
+  assert.ok(info.indexOf(">Unsubscribe</button>") < info.indexOf(">Removed</button>"));
+  const compoundInfo = renderToStaticMarkup(
+    <ModInfoPanel
+      mod={next.mods[0]}
+      tags={requireValue(next.userTags)}
+      removalRequiresUnsubscribe
+      onSubscribe={noop}
+      onUnsubscribe={noop}
+      onRemoveModFromLibrary={noop}
+      onAssignTag={noop}
+      onCreateTag={noop}
+    />,
+  );
+  assert.match(compoundInfo, /title="Unsubscribe and remove from library"/);
+  assert.match(compoundInfo, />Removed<\/button>/);
+  const pendingRemovalInfo = renderToStaticMarkup(
+    <ModInfoPanel
+      mod={next.mods[0]}
+      tags={requireValue(next.userTags)}
+      pendingActions={[draftActions.unsubscribe, draftActions.remove]}
+      onSubscribe={noop}
+      onUnsubscribe={noop}
+      onAddModToLibrary={noop}
+      onRemoveModFromLibrary={noop}
+      onAssignTag={noop}
+      onCreateTag={noop}
+    />,
+  );
+  assert.match(pendingRemovalInfo, />Add back<\/button>/);
+  assert.match(pendingRemovalInfo, /other pending actions are unchanged/);
+  assert.doesNotMatch(pendingRemovalInfo, />Removed<\/button>/);
+  const notSubscribedInfo = renderToStaticMarkup(
+    <ModInfoPanel
+      mod={next.mods[1]}
+      tags={requireValue(next.userTags)}
+      onSubscribe={noop}
+      onUnsubscribe={noop}
+      onRemoveModFromLibrary={noop}
+      onAssignTag={noop}
+      onCreateTag={noop}
+    />,
+  );
+  assert.match(notSubscribedInfo, />Not subscribe<\/span>/);
+  assert.match(notSubscribedInfo, />Subscribe<\/button>/);
   assert.match(info, /Create tag/);
 });
 
-void test("right panel shows subscribed mods, tags and a non-active cleanup action, without editable Active or game apply controls", () => {
+void test("right panel shows only active mods with load order and no subscription controls", () => {
   const next = normalizeVault(savedVault);
   const html = renderToStaticMarkup(
     <SubscribedModsPanel
@@ -435,7 +527,7 @@ void test("right panel shows subscribed mods, tags and a non-active cleanup acti
       tags={requireValue(next.userTags)}
       search=""
       searchScope="all"
-      sort="active"
+      sort="load-order"
       activeIds={new Set(["steam-1"])}
       activeOrder={new Map([["steam-1", 4]])}
       onSearch={noop}
@@ -444,17 +536,21 @@ void test("right panel shows subscribed mods, tags and a non-active cleanup acti
       onSelect={noop}
       onSubscribe={noop}
       onUnsubscribe={noop}
+      onAutoSort={noop}
     />,
   );
-  assert.match(html, /Subscribed mods/);
+  assert.match(html, /<h2[^>]*>Active<\/h2>/);
+  assert.match(html, /aria-label="Active mods"/);
   assert.doesNotMatch(html, /Unsubscribe all non-active mods|Delete all library mods/);
-  assert.match(html, /Unsubscribe from Mod 1/);
-  assert.match(html, /Search subscribed mods/);
-  assert.match(html, /Search subscribed mods by/);
-  assert.doesNotMatch(html, /Filter subscribed by tag/);
+  assert.doesNotMatch(html, /Subscribe to|Unsubscribe from/);
+  assert.match(html, /Search active mods/);
+  assert.match(html, /Search active mods by/);
+  assert.doesNotMatch(html, /Filter active by tag/);
   assert.match(html, /QoL|qol/);
-  assert.doesNotMatch(html, /Load order|>#4</);
-  assert.doesNotMatch(html, /Create modlist|Apply Active|Remove .* from Active/);
+  assert.match(html, /class="load-order-number" aria-label="Load order 4">4<\/span>/);
+  assert.match(html, /Auto-sort/);
+  assert.match(html, /Double-click to stage deactivation/);
+  assert.doesNotMatch(html, /Active first|Create modlist|Apply Active/);
 });
 
 void test("DaisyUI tag editor blocks duplicate names and offers palette plus custom color", () => {

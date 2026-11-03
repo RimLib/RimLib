@@ -10,9 +10,13 @@ import {
   selectModRow,
 } from "../utils/modSelection";
 import {
+  type ModFilter,
+  modFilters,
   type ModPanelMode,
   type ModSort,
   modSorts,
+  type ModTagFilter,
+  modTagFilters,
   type SearchScope,
   searchScopes,
 } from "../utils/uiConstants";
@@ -21,6 +25,8 @@ export interface ModPanelView {
   readonly search: string;
   readonly searchScope: SearchScope;
   readonly sort: ModSort;
+  readonly filter: ModFilter;
+  readonly tagFilter: ModTagFilter;
 }
 
 export type VisibleModIds = Readonly<Record<ModPanelMode, readonly string[]>>;
@@ -30,6 +36,9 @@ interface WorkspaceActions {
   setSearch: (panel: ModPanelMode, search: string) => void;
   setSearchScope: (panel: ModPanelMode, searchScope: SearchScope) => void;
   setSort: (panel: ModPanelMode, sort: ModSort) => void;
+  setFilter: (panel: ModPanelMode, filter: ModFilter) => void;
+  setTagFilter: (panel: ModPanelMode, tagFilter: ModTagFilter) => void;
+  setModStatusFilter: (filter: ModFilter) => void;
   select: (
     panel: ModPanelMode,
     orderedIds: readonly string[],
@@ -70,7 +79,9 @@ export function createWorkspaceStore(): WorkspaceStore {
         if (
           next.search === previous.search &&
           next.searchScope === previous.searchScope &&
-          next.sort === previous.sort
+          next.sort === previous.sort &&
+          next.filter === previous.filter &&
+          next.tagFilter === previous.tagFilter
         ) {
           return state;
         }
@@ -83,8 +94,20 @@ export function createWorkspaceStore(): WorkspaceStore {
 
     return {
       views: {
-        unsubscribed: { search: "", searchScope: searchScopes.all, sort: modSorts.newest },
-        subscribed: { search: "", searchScope: searchScopes.all, sort: modSorts.active },
+        unsubscribed: {
+          search: "",
+          searchScope: searchScopes.all,
+          sort: modSorts.newest,
+          filter: modFilters.all,
+          tagFilter: modTagFilters.all,
+        },
+        subscribed: {
+          search: "",
+          searchScope: searchScopes.all,
+          sort: modSorts.loadOrder,
+          filter: modFilters.all,
+          tagFilter: modTagFilters.all,
+        },
       },
       focusedModId: undefined,
       selection: emptySelection,
@@ -100,6 +123,43 @@ export function createWorkspaceStore(): WorkspaceStore {
         },
         setSort: (panel, sort) => {
           setView(panel, { sort });
+        },
+        setFilter: (panel, filter) => {
+          setView(panel, { filter });
+        },
+        setTagFilter: (panel, tagFilter) => {
+          setView(panel, { tagFilter });
+        },
+        setModStatusFilter: (filter) => {
+          set((state) => {
+            const inactiveFilter =
+              filter === modFilters.pendingDeactivation ? filter : modFilters.all;
+            const activeFilter =
+              filter === modFilters.invalid || filter === modFilters.pendingActivation
+                ? filter
+                : modFilters.all;
+            const inactiveView = state.views.unsubscribed;
+            const activeView = state.views.subscribed;
+            const nextInactive =
+              inactiveView.filter === inactiveFilter
+                ? inactiveView
+                : { ...inactiveView, filter: inactiveFilter };
+            const nextActive =
+              activeView.filter === activeFilter
+                ? activeView
+                : { ...activeView, filter: activeFilter };
+            if (nextInactive === inactiveView && nextActive === activeView) {
+              return state;
+            }
+            return {
+              views: {
+                ...state.views,
+                unsubscribed: nextInactive,
+                subscribed: nextActive,
+              },
+              contextMenu: undefined,
+            };
+          });
         },
         select: (panel, orderedIds, id, modifiers) => {
           if (!orderedIds.includes(id)) {

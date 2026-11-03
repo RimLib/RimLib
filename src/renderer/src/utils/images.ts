@@ -1,6 +1,11 @@
+import { officialPackageIdFromImageUrl } from "../../../shared/officialContent";
+
 export function modImageUrl(value?: string, refreshedAt?: string): string | undefined {
   if (!value) {
     return undefined;
+  }
+  if (officialPackageIdFromImageUrl(value)) {
+    return value;
   }
   try {
     const url = new URL(value);

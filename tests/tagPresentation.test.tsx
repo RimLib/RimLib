@@ -17,7 +17,7 @@ import {
 } from "../src/renderer/src/components/panels/ModsPanel";
 import { filterLibrary } from "../src/renderer/src/utils/library";
 import { tagChipStyle } from "../src/renderer/src/utils/tagColors";
-import { searchScopes } from "../src/renderer/src/utils/uiConstants";
+import { modTagFilters, searchScopes } from "../src/renderer/src/utils/uiConstants";
 import type { Mod, ModTag } from "../src/shared/types";
 import { requireValue } from "../src/shared/validation";
 
@@ -46,7 +46,7 @@ const panelProps: ModsPanelProps = {
   tags: [tag],
   search: "",
   searchScope: searchScopes.all,
-  sort: "active",
+  sort: "load-order",
   activeIds: new Set(["2"]),
   activeOrder: new Map([["2", 1]]),
   onSearch: noop,
@@ -124,7 +124,15 @@ void test("mod rows, tag assignment, management and bulk editing share the fille
       <TagAssignments tags={[tag]} assignedIds={[]} onToggle={noop} onCreate={noop} />,
     ),
     renderToStaticMarkup(
-      <ManageTagsModal tags={[tag]} onCreate={noop} onEdit={noop} onDelete={noop} onClose={noop} />,
+      <ManageTagsModal
+        tags={[tag]}
+        inactiveCountByTagId={new Map([[tag.id, 1]])}
+        onAddTagToActive={noop}
+        onCreate={noop}
+        onEdit={noop}
+        onDelete={noop}
+        onClose={noop}
+      />,
     ),
     renderToStaticMarkup(
       <BulkTagsModal
@@ -142,10 +150,8 @@ void test("mod rows, tag assignment, management and bulk editing share the fille
     assert.match(html, /background-color:#7fbf90;color:#000000/);
     assert.doesNotMatch(html, /<i\b/);
   }
-  assert.ok(
-    requireValue(views[0]).indexOf('class="active-pill"') <
-      requireValue(views[0]).indexOf('class="user-tag"'),
-  );
+  assert.match(requireValue(views[0]), /class="mod-row-status"[^>]*>.*class="user-tag"/s);
+  assert.doesNotMatch(requireValue(views[0]), /class="active-pill"/);
 });
 
 void test("active sorting combines with scoped search and keeps the game's order without editing tags", () => {
@@ -178,15 +184,35 @@ void test("active sorting combines with scoped search and keeps the game's order
   assert.equal(JSON.stringify(mods), before);
 });
 
-void test("search scope selector replaces tag filtering and personal tag names remain searchable", () => {
+void test("tag filtering coexists with scoped search and exposes named and untagged choices", () => {
   const realTag = { ...tag, id: "tag-active", name: "Active" };
   const html = renderToStaticMarkup(
-    <ModsPanel {...panelProps} searchScope={searchScopes.tags} tags={[realTag]} />,
+    <ModsPanel
+      {...panelProps}
+      searchScope={searchScopes.tags}
+      tags={[realTag]}
+      tagFilter={realTag.id}
+      onTagFilter={noop}
+    />,
   );
-  assert.match(html, /aria-label="Search subscribed mods by"/);
+  assert.match(html, /aria-label="Search active mods by"/);
   assert.match(html, /<option value="all">All<\/option>/);
   assert.match(html, /<option value="tags" selected="">Tags<\/option>/);
-  assert.doesNotMatch(html, /Filter subscribed by tag|All tags|Untagged|system:active/);
+  assert.match(html, /aria-label="Filter active mods by tag"/);
+  assert.match(html, />All tags<\/option>/);
+  assert.match(html, /<option[^>]*selected=""[^>]*>Active<\/option>/);
+  assert.match(html, />Untagged<\/option>/);
+  assert.doesNotMatch(html, /system:active/);
+
+  const untagged = renderToStaticMarkup(
+    <ModsPanel
+      {...panelProps}
+      tags={[realTag]}
+      tagFilter={modTagFilters.untagged}
+      onTagFilter={noop}
+    />,
+  );
+  assert.match(untagged, /<option[^>]*selected=""[^>]*>Untagged<\/option>/);
   assert.deepEqual(
     filterLibrary(
       [{ ...mod("1"), userTagIds: [realTag.id] }, mod("2")],
@@ -217,13 +243,13 @@ void test("the header contains labeled icon commands and status messages without
     assert.match(html, /lucide-tags/);
     assert.match(html, /lucide-refresh-cw/);
     assert.doesNotMatch(html, /Library statistics|\d+ saved|\d+ subscribed|\d+ tags/);
-    assert.match(html, /<span>Unsubscribe non-active<\/span>/);
-    assert.equal((html.match(/<button[^>]*disabled=""/g) ?? []).length, disabled ? 3 : 1);
-    assert.ok(html.indexOf("Ready") < html.indexOf("Active status could not be fully verified"));
+    assert.match(html, /<span>Unsubscribe inactive<\/span>/);
+    assert.equal((html.match(/<button[^>]*disabled=""/g) ?? []).length, disabled ? 4 : 0);
+    assert.ok(html.indexOf("Ready") < html.indexOf("Active-list changes"));
   }
 });
 
-void test("Mod Info retains long content and constrains horizontal overflow through wrapping rather than truncating metadata", async () => {
+void test("Mod Info retains long content, clamps descriptions and wraps metadata without horizontal overflow", async () => {
   const content = "VeryLongUnbrokenText".repeat(100);
   const html = renderToStaticMarkup(
     <ModInfoPanel
@@ -242,6 +268,10 @@ void test("Mod Info retains long content and constrains horizontal overflow thro
     />,
   );
   assert.ok((html.match(new RegExp(content, "g")) ?? []).length >= 6);
+  assert.match(html, /class="summary summary-clamped"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /aria-label="Expand mod description"/);
+  assert.match(html, />More<\/button>/);
   const css = await readFile("src/renderer/src/styles/custom.css", "utf8");
   const tagsCss = await readFile("src/renderer/src/styles/tags.css", "utf8");
   assert.match(css, /\.mod-info\s*\{[^}]*min-w-0[^}]*overflow-x-hidden overflow-y-auto/);
@@ -258,6 +288,25 @@ void test("Mod Info retains long content and constrains horizontal overflow thro
     /\.tag-assignments \.user-tag > span\s*\{[^}]*whitespace-normal[^}]*overflow-wrap: anywhere/,
   );
   assert.match(tagsCss, /\.assignment-options\s*\{[^}]*overflow-x-hidden overflow-y-auto/);
+  assert.match(
+    css,
+    /\.summary-clamped\s*\{[^}]*overflow: hidden;[^}]*-webkit-box-orient: vertical;[^}]*-webkit-line-clamp: 4;/,
+  );
+  assert.match(css, /\.summary-toggle\s*\{[^}]*text-\[11px\][^}]*text-\[#83b9e8\]/);
+});
+
+void test("short Mod Info descriptions do not render an unnecessary expand control", () => {
+  const html = renderToStaticMarkup(
+    <ModInfoPanel
+      mod={mod("1")}
+      tags={[]}
+      onRemoveModFromLibrary={noop}
+      onAssignTag={noop}
+      onCreateTag={noop}
+    />,
+  );
+  assert.match(html, /<p[^>]*class="summary">Summary<\/p>/);
+  assert.doesNotMatch(html, /Expand mod description|summary-toggle/);
 });
 
 void test("enabled context actions have a brighter hover and keyboard-focus background without changing disabled actions", async () => {

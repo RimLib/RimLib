@@ -11,8 +11,11 @@ export const paths = Object.freeze({
   userData: join(root, "user-data"),
   session: join(root, "session"),
   logs: join(root, "logs"),
+  game: join(root, "RimWorld"),
   workshop: join(root, "Steam library with spaces", "steamapps", "workshop", "content", "294100"),
   config: join(root, "game-config", "ModsConfig.xml"),
+  modListImport: join(root, "mod-lists", "import.xml"),
+  modListExport: join(root, "mod-lists", "export.xml"),
 });
 
 export function controls(): Controls {

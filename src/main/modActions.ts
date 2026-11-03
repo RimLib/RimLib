@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { withReadTimeout } from "../shared/async";
 import { defaultReadTimeoutMs } from "../shared/limits";
-import { normalizePackageId } from "../shared/packages";
+import { installedModId } from "../shared/packages";
 import { createSteamWorkshopUrl, getModWorkshopId, RIMWORLD_APP_ID } from "../shared/steam";
 import type { ActiveModsState, AppSettings, ModVault } from "../shared/types";
 import { errorCode } from "../shared/validation";
@@ -38,6 +38,12 @@ export function openWorkshopInBrowser(
   shell: Pick<ModActionShell, "openExternal">,
 ): Promise<void> {
   return shell.openExternal(createSteamWorkshopUrl(workshopId));
+}
+
+export async function launchRimWorld(shell: Pick<ModActionShell, "openExternal">): Promise<void> {
+  const url = `steam://rungameid/${RIMWORLD_APP_ID}`;
+  await shell.openExternal(url);
+  log.info("rimworld.launch.requested", { url });
 }
 
 async function isModDirectory(path: string): Promise<boolean> {
@@ -77,13 +83,7 @@ async function resolveModFolder(
   let localPath = saved?.localPath;
   if (!workshopId && !localPath) {
     const active = await (dependencies.activeMods ?? getActiveModsView)(settings);
-    const installed = active.installedMods?.find(
-      (mod) =>
-        modId ===
-        (mod.workshopId
-          ? `steam-${mod.workshopId}`
-          : `active-package:${normalizePackageId(mod.packageId)}`),
-    );
+    const installed = active.installedMods?.find((mod) => modId === installedModId(mod));
     workshopId = installed?.workshopId;
     localPath = installed?.localPath;
   }

@@ -3,9 +3,13 @@ import { join } from "node:path";
 
 import {
   getActiveModsView as readActiveView,
+  getInstalledMods as readInstalledMods,
   InstalledModIndex,
 } from "../../src/main/installedMods";
-import { getActiveMods as readActiveMods } from "../../src/main/rimWorldConfig";
+import {
+  getActiveMods as readActiveMods,
+  setActiveMods as writeActiveMods,
+} from "../../src/main/rimWorldConfig";
 import {
   type SteamClient,
   SteamRequestTimeoutError,
@@ -67,7 +71,7 @@ export function getSteamClient(): SteamClient {
 
 export async function assertGameClosed(): Promise<void> {
   if (controls().gameRunning) {
-    throw new Error("Close RimWorld before changing subscriptions.");
+    throw new Error("Close RimWorld before changing active mods or subscriptions.");
   }
 }
 
@@ -76,11 +80,36 @@ function configuredPath(value: string | undefined, fallback: string): string {
   return checkedPath(path === undefined || path === "" ? fallback : path);
 }
 
+export function defaultConfigPath(): string {
+  return paths.config;
+}
+
+export function resolveConfigPath(settings: Pick<AppSettings, "rimWorldConfigPath"> = {}): string {
+  return configuredPath(settings.rimWorldConfigPath, paths.config);
+}
+
 export async function getActiveMods(settings: AppSettings = {}): Promise<ActiveModsState> {
   return readActiveMods({
     ...settings,
     rimWorldConfigPath: configuredPath(settings.rimWorldConfigPath, paths.config),
   });
+}
+
+export async function setActiveMods(
+  settings: AppSettings | undefined,
+  packageIds: string[],
+  expectedPackageIds: string[],
+): Promise<ActiveModsState> {
+  const resolved = settings ?? {};
+  return writeActiveMods(
+    {
+      ...resolved,
+      rimWorldConfigPath: configuredPath(resolved.rimWorldConfigPath, paths.config),
+    },
+    packageIds,
+    expectedPackageIds,
+    { assertClosed: assertGameClosed },
+  );
 }
 
 export async function readAboutXml(path: string) {
@@ -97,6 +126,12 @@ export async function discoverWorkshopFolders(_libraries?: string[], settings: A
 }
 
 const installed = new InstalledModIndex(0);
+
+export async function getInstalledMods(settings: AppSettings = {}, forceRefresh = false) {
+  return readInstalledMods(settings, forceRefresh, () =>
+    installed.read([], configuredPath(settings.workshopModsPath, paths.workshop), forceRefresh),
+  );
+}
 
 export async function getActiveModsView(settings: AppSettings = {}): Promise<ActiveModsState> {
   return readActiveView(settings, () =>
@@ -117,5 +152,5 @@ export async function findSteamLibraries(): Promise<string[]> {
 }
 
 export async function findRimWorldInstallations(): Promise<string[]> {
-  return [];
+  return [paths.game];
 }

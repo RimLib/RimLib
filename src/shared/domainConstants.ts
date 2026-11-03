@@ -29,3 +29,7 @@ export const subscriptionActions = Object.freeze({
   subscribeMods: "subscribe-mods",
   unsubscribeMods: "unsubscribe-mods",
 } as const);
+export const workshopSyncModes = Object.freeze({
+  light: "light",
+  full: "full",
+} as const);

@@ -6,7 +6,13 @@ import { emptyVault } from "../data/defaults";
 import { getStore } from "../services/modStore";
 import { uiTimings } from "../utils/uiConstants";
 
-export function useModVault(onError: (message: string) => void) {
+type PrepareVaultForSave = (vault: ModVault) => ModVault;
+type VaultChange = (previous: ModVault) => ModVault;
+
+export function useModVault(
+  onError: (message: string) => void,
+  prepareVaultForSave?: PrepareVaultForSave,
+) {
   const [vault, setVault] = useState<ModVault>(emptyVault);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -17,22 +23,26 @@ export function useModVault(onError: (message: string) => void) {
   const revision = useRef<string | undefined>(undefined);
   const changes = useRef(0);
   const savedChanges = useRef(0);
+  const pendingChanges = useRef<VaultChange[]>([]);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const operation = useRef<Promise<unknown>>(Promise.resolve());
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const deletedTags = useRef(new Set<string>());
   const errorCallback = useRef(onError);
   errorCallback.current = onError;
+  const prepareCallback = useRef(prepareVaultForSave);
+  prepareCallback.current = prepareVaultForSave;
 
   const adopt = useCallback((next: ModVault) => {
     changes.current = 0;
     savedChanges.current = 0;
+    pendingChanges.current = [];
     current.current = next;
     revision.current = next.revision;
     setVault(next);
   }, []);
 
-  const update = useCallback((change: (previous: ModVault) => ModVault) => {
+  const update = useCallback((change: VaultChange) => {
     if (!ready.current || locked.current) {
       return;
     }
@@ -41,6 +51,7 @@ export function useModVault(onError: (message: string) => void) {
       return;
     }
     changes.current++;
+    pendingChanges.current.push(change);
     current.current = next;
     setVault(next);
   }, []);
@@ -52,17 +63,66 @@ export function useModVault(onError: (message: string) => void) {
     const result = saveQueue.current
       .catch(() => undefined)
       .then(async () => {
-        if (!ready.current || changes.current === savedChanges.current) {
+        // A failed initial load leaves editing disabled and there is nothing to flush. In
+        // particular, do not retry the same corrupt/future database during the close handshake:
+        // rejecting that handshake would keep an otherwise untouched window open forever.
+        if (!ready.current) {
           return;
         }
-        const version = changes.current;
+        const rebasePendingChanges = async () => {
+          const latest = await getStore().load();
+          if (latest.revision === revision.current) {
+            return false;
+          }
+          const rebased = pendingChanges.current.reduce((next, change) => change(next), latest);
+          revision.current = latest.revision;
+          current.current = rebased;
+          setVault(rebased);
+          return true;
+        };
+
+        await rebasePendingChanges();
+        const prepared = prepareCallback.current?.(current.current) ?? current.current;
+        if (prepared !== current.current) {
+          changes.current++;
+          current.current = prepared;
+          setVault(prepared);
+        }
+        if (changes.current === savedChanges.current) {
+          return;
+        }
+        let version = changes.current;
+        let pendingChangeCount = pendingChanges.current.length;
         const tags = [...deletedTags.current];
-        const saved = await getStore().save(
-          { ...current.current, revision: revision.current },
-          { deletedTagIds: tags },
-        );
+        let saved: ModVault;
+        try {
+          saved = await getStore().save(
+            { ...current.current, revision: revision.current },
+            { deletedTagIds: tags },
+          );
+        } catch (error) {
+          // Native actions also write through VaultStore. If one completed after our preflight
+          // read, replay only the still-unsaved renderer transforms on its authoritative result
+          // and retry once. A disk failure keeps the same revision and is never masked here.
+          if (!(await rebasePendingChanges())) {
+            throw error;
+          }
+          const retried = prepareCallback.current?.(current.current) ?? current.current;
+          if (retried !== current.current) {
+            changes.current++;
+            current.current = retried;
+            setVault(retried);
+          }
+          version = changes.current;
+          pendingChangeCount = pendingChanges.current.length;
+          saved = await getStore().save(
+            { ...current.current, revision: revision.current },
+            { deletedTagIds: tags },
+          );
+        }
         revision.current = saved.revision;
         savedChanges.current = version;
+        pendingChanges.current.splice(0, pendingChangeCount);
         current.current = { ...current.current, revision: saved.revision };
         setVault(current.current);
         tags.forEach((id) => deletedTags.current.delete(id));

@@ -38,7 +38,9 @@ export function sampleMod(
   const dependencies =
     item.id === sampleMods.active.id
       ? [{ packageId: "example.framework", displayName: "Example Framework" }]
-      : undefined;
+      : item.id === sampleMods.camera.id
+        ? [{ packageId: sampleMods.weapons.packageId, displayName: sampleMods.weapons.name }]
+        : undefined;
   return {
     ...item,
     id: `steam-${item.id}`,
@@ -54,8 +56,8 @@ export function sampleMod(
     downloadedAt: `2026-09-${String(28 - index).padStart(2, "0")}T12:00:00.000Z`,
     addedAt: "2026-08-01T12:00:00.000Z",
     gameVersions: ["1.5"],
-    thumbnail: "https://e2e.invalid/broken.png",
-    screenshots: ["https://e2e.invalid/broken.png"],
+    // Keep the shared workspace free from network timing; recovery.spec covers image failures.
+    screenshots: [],
     notes: `Personal notes for ${item.name}`,
   };
 }
@@ -72,6 +74,10 @@ export function sampleVault(config: string, workshop: string): ModVault {
     localSteamState: {
       source: steamStatusSources.workshopFolders,
       observedIds: [...initialSubscribedIds],
+      // The shared fixture represents an established library whose existing Workshop metadata was
+      // already attempted. Tests that discover a new folder still exercise the automatic refresh
+      // for that new ID without every unrelated test racing a background startup sync.
+      metadataAttemptedIds: [...initialSubscribedIds],
       pending: {},
     },
     settings: { rimWorldConfigPath: config, workshopModsPath: workshop },
@@ -80,6 +86,29 @@ export function sampleVault(config: string, workshop: string): ModVault {
 
 export function configXml(packages = initialActivePackages): string {
   return `<?xml version="1.0"?><ModsConfigData><version>1.6</version><activeMods>${packages.map((id) => `<li>${id}</li>`).join("")}</activeMods><knownExpansions /></ModsConfigData>`;
+}
+
+export function modListXml(
+  packages: readonly string[] = [
+    sampleMods.harmony.packageId,
+    "ludeon.rimworld",
+    sampleMods.weapons.packageId,
+    "example.missing",
+    sampleMods.active.packageId,
+  ],
+): string {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<ModsConfigData>
+  <version>1.6.4871 rev595</version>
+  <activeMods>
+${packages.map((id) => `    <li>${id}</li>`).join("\n")}
+  </activeMods>
+  <knownExpansions>
+    <li>ludeon.rimworld.royalty</li>
+    <li>ludeon.rimworld.ideology</li>
+  </knownExpansions>
+</ModsConfigData>
+`;
 }
 
 export function aboutXml(mod: Mod): string {

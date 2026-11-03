@@ -13,6 +13,7 @@ import type {
   AppSettings,
   Mod,
   ModDependency,
+  ModLoadRule,
   SteamImportResult,
   SteamOperationProgress,
 } from "../shared/types";
@@ -364,44 +365,90 @@ async function readWorkshopFolders(
 
 const aboutCache = new Map<string, { fingerprint: string; metadata: Partial<Mod> }>();
 
-function readDependencies(metadata: Record<string, unknown>): ModDependency[] {
-  const dependencies = new Map<string, ModDependency>();
-  const add = (value: unknown, gameVersion?: string) => {
-    const entry = xmlRecord(value);
-    const packageId = xmlText(entry.packageId) ?? xmlText(value);
-    if (!isUsablePackageId(packageId)) {
-      return;
-    }
-    const displayName = xmlText(entry.displayName);
-    const key = normalizePackageId(packageId);
-    const previous = dependencies.get(key);
-    const gameVersions =
-      !gameVersion || (previous && !previous.gameVersions)
-        ? undefined
-        : [...new Set([...(previous?.gameVersions ?? []), gameVersion])];
-    dependencies.set(key, {
-      packageId,
-      ...((displayName ?? previous?.displayName)
-        ? { displayName: displayName ?? previous?.displayName }
-        : {}),
-      ...(gameVersions ? { gameVersions } : {}),
-    });
-  };
-  const addList = (value: unknown, gameVersion?: string) => {
+function metadataVersionKey(key: string): string | undefined {
+  const version = key.trim().toLowerCase();
+  return /^v?\d+\.\d+(?:\..*)?$/.test(version) ? version : undefined;
+}
+
+function readDependencies(metadata: Record<string, unknown>): {
+  base: ModDependency[];
+  byVersion: { gameVersion: string; dependencies: ModDependency[] }[];
+} {
+  const readList = (value: unknown): ModDependency[] => {
+    const dependencies = new Map<string, ModDependency>();
     const list = xmlRecord(value).li;
     for (const entry of Array.isArray(list) ? list : list === undefined ? [] : [list]) {
-      add(entry, gameVersion);
+      const record = xmlRecord(entry);
+      const packageId = xmlText(record.packageId) ?? xmlText(entry);
+      if (!isUsablePackageId(packageId)) {
+        continue;
+      }
+      const displayName = xmlText(record.displayName);
+      const key = normalizePackageId(packageId);
+      const previous = dependencies.get(key);
+      dependencies.set(key, {
+        packageId: key,
+        ...((displayName ?? previous?.displayName)
+          ? { displayName: displayName ?? previous?.displayName }
+          : {}),
+      });
     }
+    return [...dependencies.values()];
   };
 
-  addList(metadata.modDependencies);
+  const byVersion: { gameVersion: string; dependencies: ModDependency[] }[] = [];
   for (const [key, list] of Object.entries(xmlRecord(metadata.modDependenciesByVersion))) {
-    const gameVersion = key.replace(/^v(?=\d)/, "");
-    if (/^\d+\.\d+$/.test(gameVersion)) {
-      addList(list, gameVersion);
+    const gameVersion = metadataVersionKey(key);
+    if (gameVersion) {
+      byVersion.push({ gameVersion, dependencies: readList(list) });
     }
   }
-  return [...dependencies.values()];
+  return { base: readList(metadata.modDependencies), byVersion };
+}
+
+function readLoadRules(
+  metadata: Record<string, unknown>,
+  fields: {
+    base: "loadAfter" | "loadBefore";
+    byVersion: "loadAfterByVersion" | "loadBeforeByVersion";
+    force: "forceLoadAfter" | "forceLoadBefore";
+  },
+): {
+  base: ModLoadRule[];
+  byVersion: { gameVersion: string; rules: ModLoadRule[] }[];
+  force: ModLoadRule[];
+} {
+  const readList = (value: unknown): ModLoadRule[] => {
+    const rules = new Map<string, ModLoadRule>();
+    const list = xmlRecord(value).li;
+    for (const value of Array.isArray(list) ? list : list === undefined ? [] : [list]) {
+      const entry = xmlRecord(value);
+      const rawPackageId = xmlText(entry.packageId) ?? xmlText(value);
+      if (!isUsablePackageId(rawPackageId)) {
+        continue;
+      }
+      const packageId = normalizePackageId(rawPackageId);
+      if (!isUsablePackageId(packageId)) {
+        continue;
+      }
+      rules.set(packageId, { packageId });
+    }
+    return [...rules.values()];
+  };
+
+  const byVersion: { gameVersion: string; rules: ModLoadRule[] }[] = [];
+  for (const [key, list] of Object.entries(xmlRecord(metadata[fields.byVersion]))) {
+    const gameVersion = metadataVersionKey(key);
+    if (gameVersion) {
+      byVersion.push({ gameVersion, rules: readList(list) });
+    }
+  }
+  return {
+    base: readList(metadata[fields.base]),
+    byVersion,
+    // Force rules are not version overrides and therefore always remain applicable.
+    force: readList(metadata[fields.force]),
+  };
 }
 
 export async function readAboutXml(path: string): Promise<Partial<Mod>> {
@@ -438,13 +485,31 @@ export async function readAboutXml(path: string): Promise<Partial<Mod>> {
   if (!Object.keys(metadata).length) {
     throw new Error("Invalid About.xml metadata.");
   }
+  const dependencies = readDependencies(metadata);
+  const loadAfter = readLoadRules(metadata, {
+    base: "loadAfter",
+    byVersion: "loadAfterByVersion",
+    force: "forceLoadAfter",
+  });
+  const loadBefore = readLoadRules(metadata, {
+    base: "loadBefore",
+    byVersion: "loadBeforeByVersion",
+    force: "forceLoadBefore",
+  });
   const result: Partial<Mod> = {
     name: xmlText(metadata.name),
     author:
       xmlText(metadata.author) ?? (xmlList(xmlRecord(metadata.authors).li).join(", ") || undefined),
     packageId: xmlText(metadata.packageId),
     summary: xmlText(metadata.description),
-    dependencies: readDependencies(metadata),
+    dependencies: dependencies.base,
+    dependenciesByVersion: dependencies.byVersion,
+    loadAfter: loadAfter.base,
+    loadAfterByVersion: loadAfter.byVersion,
+    forceLoadAfter: loadAfter.force,
+    loadBefore: loadBefore.base,
+    loadBeforeByVersion: loadBefore.byVersion,
+    forceLoadBefore: loadBefore.force,
     gameVersions: xmlList(xmlRecord(metadata.supportedVersions).li),
   };
   if (aboutCache.size >= steamLimits.aboutCacheEntries) {
@@ -455,7 +520,17 @@ export async function readAboutXml(path: string): Promise<Partial<Mod>> {
     file,
     packageId: result.packageId,
     hasAuthor: Boolean(result.author),
-    dependencyCount: result.dependencies?.length,
+    dependencyCount:
+      dependencies.base.length +
+      dependencies.byVersion.reduce((count, group) => count + group.dependencies.length, 0),
+    loadAfterCount:
+      loadAfter.base.length +
+      loadAfter.force.length +
+      loadAfter.byVersion.reduce((count, group) => count + group.rules.length, 0),
+    loadBeforeCount:
+      loadBefore.base.length +
+      loadBefore.force.length +
+      loadBefore.byVersion.reduce((count, group) => count + group.rules.length, 0),
     gameVersionCount: result.gameVersions?.length,
   });
   return { ...result };
@@ -471,8 +546,16 @@ export async function importInstalledSteamMods(
   const libraries = discovery.steamLibraryPaths;
   log.info("steam.metadata.import.started", { subscribedCount: subscribedIds.length, libraries });
   const manifestPaths = discovery.manifestPaths;
-  const warnings: string[] = [...discovery.warnings];
+  const warnings = [...new Set(discovery.warnings)];
+  const warningSet = new Set(warnings);
+  const addWarning = (warning: string) => {
+    if (!warningSet.has(warning)) {
+      warningSet.add(warning);
+      warnings.push(warning);
+    }
+  };
   const details = new Map<string, WorkshopDetail>();
+  const completedMetadataRequests = new Set<string>();
   for (let index = 0; index < subscribedIds.length; index += steamLimits.metadataBatchSize) {
     const ids = subscribedIds.slice(index, index + steamLimits.metadataBatchSize);
     progress?.({
@@ -484,13 +567,14 @@ export async function importInstalledSteamMods(
       for (const detail of await fetchWorkshopDetails(ids, fetchMetadata)) {
         details.set(detail.publishedfileid, detail);
       }
+      ids.forEach((id) => completedMetadataRequests.add(id));
     } catch (error) {
       log.warn("steam.metadata.batch.failed", {
         batchOffset: index,
         requestedCount: ids.length,
         error,
       });
-      warnings.push((error as Error).message);
+      addWarning(error instanceof Error ? error.message : String(error));
       break;
     }
   }
@@ -542,7 +626,7 @@ export async function importInstalledSteamMods(
       throw new Error("Installed Workshop metadata result was lost.");
     }
     if (local.warning) {
-      warnings.push(local.warning);
+      addWarning(local.warning);
     }
     const now = new Date().toISOString();
     const path = paths.get(id);
@@ -550,8 +634,34 @@ export async function importInstalledSteamMods(
     const detail = details.get(id);
     const normalized = detail ? normalizeWorkshopDetail(detail) : undefined;
     const remote = normalized?.status === "available" ? normalized.metadata : undefined;
-    if (normalized && normalized.status !== "available") {
-      warnings.push(`Workshop ${id}: ${normalized.message}`);
+    if (!detail && completedMetadataRequests.has(id)) {
+      const warning = `Workshop ${id}: Steam did not return metadata for this item. Saved information was preserved.`;
+      addWarning(warning);
+      log.warn("steam.metadata.mod.unavailable", {
+        workshopId: id,
+        metadataStatus: "missing",
+        installed: Boolean(path),
+        hasPackageId: isUsablePackageId(about.packageId),
+      });
+    } else if (normalized && normalized.status !== "available") {
+      const warning = `Workshop ${id}: ${normalized.message}`;
+      addWarning(warning);
+      log.warn("steam.metadata.mod.unavailable", {
+        workshopId: id,
+        metadataStatus: normalized.status,
+        steamResult: detail?.result,
+        installed: Boolean(path),
+        hasPackageId: isUsablePackageId(about.packageId),
+      });
+    }
+    if (!isUsablePackageId(about.packageId) && !local.warning) {
+      const warning = `Workshop ${id}: installed About.xml is missing a valid package ID. Active-list matching and load-order sorting may be unavailable.`;
+      addWarning(warning);
+      log.warn("steam.metadata.about.incomplete", {
+        workshopId: id,
+        path,
+        missingFields: ["packageId"],
+      });
     }
     if (!remote || !about.packageId) {
       log.debug("steam.metadata.mod.incomplete", {
@@ -577,6 +687,13 @@ export async function importInstalledSteamMods(
       subscribed: true,
       summary: about.summary ?? remote?.summary ?? "Steam Workshop metadata imported.",
       dependencies: about.dependencies,
+      dependenciesByVersion: about.dependenciesByVersion,
+      loadAfter: about.loadAfter,
+      loadAfterByVersion: about.loadAfterByVersion,
+      forceLoadAfter: about.forceLoadAfter,
+      loadBefore: about.loadBefore,
+      loadBeforeByVersion: about.loadBeforeByVersion,
+      forceLoadBefore: about.forceLoadBefore,
       gameVersions: about.gameVersions?.length ? about.gameVersions : (remote?.gameVersions ?? []),
       tags: remote ? (remote.tags ?? ["Steam"]) : ["Steam", "Metadata needed"],
       downloadedAt: local.downloadedAt,
@@ -591,17 +708,24 @@ export async function importInstalledSteamMods(
       fileSize: remote?.fileSize,
     });
   }
-  log.info("steam.metadata.import.completed", {
+  const completion = {
     importedCount: mods.length,
     missingMetadataCount: missingMetadataIds.length,
+    missingMetadataIds,
     warningCount: warnings.length,
     warnings,
-  });
+  };
+  if (warnings.length) {
+    log.warn("steam.metadata.import.completed-with-warnings", completion);
+  } else {
+    log.info("steam.metadata.import.completed", completion);
+  }
   return {
     mods,
     subscribedIds,
     discoveredIds: subscribedIds,
     manifestPaths,
+    metadataAttemptedIds: [...completedMetadataRequests],
     missingMetadataIds,
     steamLibraryPaths: libraries,
     warnings,

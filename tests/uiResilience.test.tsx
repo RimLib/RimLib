@@ -50,18 +50,32 @@ void test("notification title has visibly stronger typography and permits synthe
   );
 });
 
-void test("subscription rows use opposite action columns and two-column content grids without a reserved date column", async () => {
+void test("warning notifications are visibly distinct from action failures", () => {
+  const html = renderToStaticMarkup(
+    <ErrorNotification
+      kind="warning"
+      message="Workshop 42 metadata was unavailable"
+      onDismiss={noop}
+    />,
+  );
+  assert.match(html, /alert alert-warning/);
+  assert.match(html, /Sync completed with warnings/);
+  assert.match(html, /Workshop 42 metadata was unavailable/);
+  assert.doesNotMatch(html, /Action failed/);
+});
+
+void test("activity rows use one full-width content column without subscription or date columns", async () => {
   const css = await readFile("src/renderer/src/styles/custom.css", "utf8");
   const tags = await readFile("src/renderer/src/styles/tags.css", "utf8");
-  assert.match(css, /\.mod-row\s*\{[^}]*grid-cols-\[minmax\(0,1fr\)_42px\]/);
-  assert.match(css, /\.mod-row\.action-start\s*\{\s*@apply grid-cols-\[42px_minmax\(0,1fr\)\]/);
-  assert.match(css, /\.mod-row\.action-start > \.tooltip-action\s*\{\s*@apply col-start-1/);
-  assert.match(css, /\.mod-row\.action-start > \.mod-row-main\s*\{\s*@apply col-start-2/);
-  assert.match(css, /\.mod-row-main\s*\{[^}]*grid-cols-\[40px_minmax\(0,1fr\)\]/);
+  const row = await readFile("src/renderer/src/components/common/ModRow.tsx", "utf8");
+  assert.match(css, /\.mod-row\s*\{[^}]*grid-cols-\[minmax\(0,1fr\)\]/);
+  assert.match(css, /\.mod-row-main\s*\{[^}]*w-full[^}]*grid-cols-\[40px_minmax\(0,1fr\)_auto\]/);
   assert.match(css, /\.mod-row-status\s*\{\s*@apply col-start-2 row-start-2/);
+  assert.doesNotMatch(row, /TooltipIconButton|Subscribe to|Unsubscribe from|action-start/);
   assert.doesNotMatch(tags, /\.row-tags/);
   assert.match(css, /grid-rows-\[minmax\(0,1fr\)_24px\]/);
   assert.match(css, /\.mod-row-main \.thumb\s*\{\s*@apply col-start-1 row-span-2/);
+  assert.match(css, /\.load-order-number\s*\{[^}]*col-start-3[^}]*justify-self-end/);
   assert.doesNotMatch(css, /\.date-pill/);
 });
 
@@ -195,6 +209,103 @@ void test("even extremely long header notices have shrinking, single-line contai
   assert.match(html, /aria-label="Sync Workshop"/);
 });
 
+void test("the header shows a small operation indicator only while loading", () => {
+  const render = (loading: boolean) =>
+    renderToStaticMarkup(
+      <AppHeader
+        notice={loading ? "Working…" : "Ready"}
+        disabled={loading}
+        loading={loading}
+        onOpenSettings={noop}
+        onManageTags={noop}
+        onSync={noop}
+        onUnsubscribeInactive={noop}
+      />,
+    );
+  const loading = render(true);
+  const idle = render(false);
+  assert.doesNotMatch(loading, /<header[^>]*aria-busy/);
+  assert.match(loading, /role="status"/);
+  assert.match(loading, /size-3\.5 shrink-0/);
+  assert.match(loading, /lucide-loader-circle[^>]*animate-spin/);
+  assert.match(loading, /Working…/);
+  assert.doesNotMatch(idle, /<header[^>]*aria-busy/);
+  assert.doesNotMatch(idle, /size-3\.5 shrink-0/);
+  assert.doesNotMatch(idle, /lucide-loader-circle/);
+  assert.match(idle, /role="status"[^>]*><span class="min-w-0 truncate">Ready<\/span>/);
+});
+
+void test("unavailable XML actions remain keyboard-focusable and expose their reason", () => {
+  const reason = "Apply or discard the pending draft before importing a mod list.";
+  const html = renderToStaticMarkup(
+    <AppHeader
+      notice="Ready"
+      disabled={false}
+      importDisabledReason={reason}
+      exportDisabledReason={reason}
+      onOpenSettings={noop}
+      onManageTags={noop}
+      onSync={noop}
+      onUnsubscribeInactive={noop}
+      onImportModList={noop}
+      onExportModList={noop}
+    />,
+  );
+  const importButton = requireValue(
+    [...html.matchAll(/<button\b[^>]*>/g)]
+      .map((match) => match[0])
+      .find((button) => button.includes('aria-label="Import mod list"')),
+  );
+  const exportButton = requireValue(
+    [...html.matchAll(/<button\b[^>]*>/g)]
+      .map((match) => match[0])
+      .find((button) => button.includes('aria-label="Export mod list"')),
+  );
+  for (const button of [importButton, exportButton]) {
+    assert.match(button, /aria-disabled="true"/);
+    assert.match(button, /action-unavailable/);
+    assert.doesNotMatch(button, /disabled=""/);
+  }
+  assert.equal(
+    html.match(new RegExp(reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))?.length,
+    2,
+  );
+});
+
+void test("installed-metadata failures have a distinct, actionable header warning", () => {
+  const metadataFailure = renderToStaticMarkup(
+    <AppHeader
+      notice="Library ready"
+      metadataError="Installed mod scan timed out"
+      disabled={false}
+      onOpenSettings={noop}
+      onManageTags={noop}
+      onSync={noop}
+      onUnsubscribeInactive={noop}
+    />,
+  );
+  assert.match(metadataFailure, /title="Installed mod scan timed out"/);
+  assert.match(
+    metadataFailure,
+    /Auto-sort is unavailable until installed mod details can be read\./,
+  );
+  assert.doesNotMatch(metadataFailure, /protected unsubscribes/);
+
+  const configurationFailure = renderToStaticMarkup(
+    <AppHeader
+      notice="Library ready"
+      activeError="ModsConfig.xml could not be read"
+      metadataError="Installed mod scan timed out"
+      disabled={false}
+      onOpenSettings={noop}
+      onManageTags={noop}
+      onSync={noop}
+      onUnsubscribeInactive={noop}
+    />,
+  );
+  assert.match(configurationFailure, /Active-list changes and auto-sort are unavailable\./);
+});
+
 const viewport = { width: 1180, height: 720 };
 const rect = (left: number, top: number) => ({
   left,
@@ -239,7 +350,7 @@ void test("tooltips flip at viewport edges and long labels stay inside the viewp
 void test("tooltip triggers keep accessible command labels and descriptions without in-panel tooltip content", () => {
   const html = renderToStaticMarkup(
     <TooltipIconButton
-      label="Steam is closed"
+      label="An operation is in progress"
       aria-label="Subscribe to Mod"
       aria-describedby="existing-description"
       disabled
@@ -248,7 +359,7 @@ void test("tooltip triggers keep accessible command labels and descriptions with
       <span>Icon</span>
     </TooltipIconButton>,
   );
-  assert.match(html, /class="tooltip-action" data-tip="Steam is closed"/);
+  assert.match(html, /class="tooltip-action" data-tip="An operation is in progress"/);
   assert.match(html, /aria-label="Subscribe to Mod"/);
   assert.match(html, /aria-describedby="existing-description"/);
   assert.match(html, /disabled=""/);

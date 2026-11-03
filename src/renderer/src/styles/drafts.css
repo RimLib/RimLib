@@ -13,22 +13,39 @@
     @apply px-3 text-[13px];
   }
   .draft-badge {
-    @apply inline-flex min-h-5 shrink-0 items-center rounded border px-1.5 text-[11px] font-bold;
+    @apply inline-flex min-h-5 shrink-0 items-center gap-1 rounded border bg-transparent px-1.5 text-[11px] font-bold;
+  }
+  .draft-badge > svg {
+    @apply shrink-0;
   }
   .draft-subscribe {
-    @apply border-[#63946f] bg-[#203c2a] text-[#c4f3ce];
+    @apply border-[#63946f] text-[#c4f3ce];
   }
   .draft-unsubscribe {
-    @apply border-[#ad8441] bg-[#382e1e] text-[#f7dfb1];
+    @apply border-[#ad8441] text-[#f7dfb1];
+  }
+  .draft-activate,
+  .draft-order {
+    @apply border-[#648fba] text-[#c8e5ff];
+  }
+  .draft-deactivate {
+    @apply border-[#9f7a54] text-[#f2d1ae];
   }
   .draft-remove {
-    @apply border-[#a6656c] bg-[#40242d] text-[#ffd1d7];
+    @apply border-[#a6656c] text-[#ffd1d7];
   }
   .mod-row.pending-subscribe {
     @apply border-l-[#63946f];
   }
   .mod-row.pending-unsubscribe {
     @apply border-l-[#ad8441];
+  }
+  .mod-row.pending-activate,
+  .mod-row.pending-order {
+    @apply border-l-[#648fba];
+  }
+  .mod-row.pending-deactivate {
+    @apply border-l-[#9f7a54];
   }
   .mod-row.pending-remove {
     @apply border-[#a6656c] bg-[#281b21];
@@ -81,7 +98,59 @@
     max-height: calc(100vh - 64px);
     overflow-y: auto;
   }
+  .modal .app-modal.auto-sort-dependencies-modal {
+    width: min(620px, calc(100% - 40px));
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+  }
   .toast.error-notification-toast {
     bottom: 70px;
+  }
+}
+
+@layer components {
+  .auto-sort-dependency-list {
+    @apply grid max-h-[min(340px,42vh)] gap-1.5 overflow-auto;
+  }
+
+  .auto-sort-dependency-list > li {
+    @apply grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border border-[#303a45] bg-[#121820] px-2.5 py-2;
+  }
+
+  .auto-sort-dependency-identity {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .auto-sort-dependency-identity strong {
+    @apply truncate text-[13px] text-[#e8edf2];
+  }
+
+  .auto-sort-dependency-identity code,
+  .auto-sort-dependency-identity small {
+    @apply truncate text-[11px] text-[#91a0b1];
+  }
+
+  .auto-sort-dependency-status {
+    @apply inline-flex items-center gap-1 text-right text-[11px];
+  }
+
+  .auto-sort-dependency-status.available {
+    @apply text-[#9ee6ae];
+  }
+
+  .auto-sort-dependency-status.unresolved {
+    @apply text-[#f0c777];
+  }
+
+  .auto-sort-dependency-warning {
+    @apply flex items-start gap-2 rounded-md border border-[#80652f] bg-[#2c2618] px-2.5 py-2 text-xs text-[#f0c777];
+  }
+
+  .auto-sort-dependency-warning > svg {
+    @apply mt-0.5 shrink-0;
+  }
+
+  .app-modal-actions.auto-sort-dependency-actions {
+    @apply grid-cols-3;
   }
 }

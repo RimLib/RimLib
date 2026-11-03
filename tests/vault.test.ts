@@ -154,6 +154,29 @@ void test("omitting entries on save never deletes mods; deletion is explicit", (
   assert.equal(deleted.mods.length, 1);
 });
 
+void test("explicit deletion forgets the removed mod's metadata attempt so reinstall can enrich it", () => {
+  const original: ModVault = {
+    ...vault(),
+    mods: vault().mods.map((entry) =>
+      entry.workshopId === "1" ? { ...entry, subscribed: false } : entry,
+    ),
+    localSteamState: {
+      observedIds: ["2"],
+      pending: {},
+      metadataAttemptedIds: ["1", "2", "999"],
+    },
+  };
+
+  const deleted = deleteLibraryModsExplicitly(original, ["steam-1"]);
+
+  assert.deepEqual(
+    deleted.mods.map((entry) => entry.workshopId),
+    ["2"],
+  );
+  assert.deepEqual(deleted.localSteamState.metadataAttemptedIds, ["2", "999"]);
+  assert.deepEqual(original.localSteamState.metadataAttemptedIds, ["1", "2", "999"]);
+});
+
 void test("normalization keeps unknown fields and rejects unsupported schemas and invalid records", () => {
   const result = normalizeVault({
     ...vault(),
@@ -257,5 +280,55 @@ void test("guarded atomic writes do not replace a changed file and clean up temp
     await writeFile(path, "external change");
     await assert.rejects(atomicWrite(path, "our data", { expected: "old data" }), /outside/);
     assert.equal(await readFile(path, "utf8"), "external change");
+    assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
+  }));
+
+void test("guarded atomic writes never replace an external pathname created at the commit boundary", async () =>
+  temporary(async (path) => {
+    await writeFile(path, "old data");
+    await assert.rejects(
+      atomicWrite(path, "our data", {
+        expected: "old data",
+        beforePublish: async (claimedPath) => {
+          assert.ok(claimedPath);
+          await writeFile(path, "external change");
+        },
+      }),
+      /outside/,
+    );
+    assert.equal(await readFile(path, "utf8"), "external change");
+    assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
+  }));
+
+void test("guarded atomic writes restore an edit made to the claimed file before publication", async () =>
+  temporary(async (path) => {
+    await writeFile(path, "old data");
+    await assert.rejects(
+      atomicWrite(path, "our data", {
+        expected: "old data",
+        beforePublish: async (claimedPath) => {
+          assert.ok(claimedPath);
+          await writeFile(claimedPath, "external change");
+        },
+      }),
+      /outside/,
+    );
+    assert.equal(await readFile(path, "utf8"), "external change");
+    assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
+  }));
+
+void test("guarded creation never replaces a file created at the commit boundary", async () =>
+  temporary(async (path) => {
+    await assert.rejects(
+      atomicWrite(path, "our data", {
+        expected: undefined,
+        beforePublish: async (claimedPath) => {
+          assert.equal(claimedPath, undefined);
+          await writeFile(path, "external creation");
+        },
+      }),
+      /outside/,
+    );
+    assert.equal(await readFile(path, "utf8"), "external creation");
     assert.deepEqual(await readdir(join(path, "..")), ["mod-vault.json"]);
   }));

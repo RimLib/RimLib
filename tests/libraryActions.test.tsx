@@ -22,12 +22,18 @@ import {
 } from "../src/renderer/src/components/panels/ModsPanel";
 import { getStore } from "../src/renderer/src/services/modStore";
 import { modImageUrl } from "../src/renderer/src/utils/images";
-import type { Mod, ModVault } from "../src/shared/types";
+import type { ActiveModsState, Mod, ModVault } from "../src/shared/types";
 import { requireValue } from "../src/shared/validation";
 import { deleteLibraryModsExplicitly, normalizeVault, serializeVault } from "../src/shared/vault";
 import { sourceCallArguments } from "./helpers/sourceCalls";
 
 const noop = () => undefined;
+const inactiveState = async (): Promise<ActiveModsState> => ({
+  packageIds: ["ludeon.rimworld"],
+  installedMods: [],
+});
+const deleteInactiveLibraryMods = (store: VaultStore, ids: string[]) =>
+  deleteLibraryMods(store, ids, inactiveState);
 const mod = (id: string, subscribed = false): Mod => ({
   id: `steam-${id}`,
   workshopId: id,
@@ -146,7 +152,7 @@ void test("bulk deletion rejects subscribed, newly subscribed, missing and malfo
 
 void test("bulk deletion writes a persistent backup, commits atomically and stays deleted on reopen and ordinary saves", async () => {
   await temporaryStore(async (store, original, directory) => {
-    const next = await deleteLibraryMods(store, ["steam-2", "steam-3"]);
+    const next = await deleteInactiveLibraryMods(store, ["steam-2", "steam-3"]);
     const files = await readdir(join(directory, "backups"));
     const backup = files.find((file) => file.includes("delete-library-mods"));
     assert.ok(backup);
@@ -161,15 +167,40 @@ void test("bulk deletion writes a persistent backup, commits atomically and stay
   });
 });
 
+void test("confirmed deletion rejects Active or unverifiable targets before backup or removal", async () => {
+  for (const active of [
+    { packageIds: ["ludeon.rimworld", "author.mod2"], installedMods: [] },
+    {
+      packageIds: ["ludeon.rimworld"],
+      installedMods: [],
+      metadataError: "Workshop drive is disconnected",
+    },
+  ] satisfies ActiveModsState[]) {
+    await temporaryStore(async (store, original, directory) => {
+      const before = await readFile(store.path, "utf8");
+      await assert.rejects(
+        deleteLibraryMods(store, ["steam-2"], async () => active),
+        /Active|could not be verified/,
+      );
+      assert.equal(await readFile(store.path, "utf8"), before);
+      assert.deepEqual((await store.load()).mods, original.mods);
+      assert.equal((await readdir(directory)).includes("backups"), false);
+    });
+  }
+});
+
 void test("bulk deletion preserves the entire database on invalid selection or external edits", async () => {
   await temporaryStore(async (store, _original, directory) => {
     const before = await readFile(store.path, "utf8");
-    await assert.rejects(deleteLibraryMods(store, ["steam-2", "steam-1"]), /Subscribed mods/);
+    await assert.rejects(
+      deleteInactiveLibraryMods(store, ["steam-2", "steam-1"]),
+      /Subscribed mods/,
+    );
     assert.equal(await readFile(store.path, "utf8"), before);
     assert.equal((await readdir(directory)).includes("backups"), false);
     const external = before + "\n";
     await writeFile(store.path, external);
-    await assert.rejects(deleteLibraryMods(store, ["steam-2"]), /changed outside/);
+    await assert.rejects(deleteInactiveLibraryMods(store, ["steam-2"]), /changed outside/);
     assert.equal(await readFile(store.path, "utf8"), external);
   });
 });
@@ -177,7 +208,7 @@ void test("bulk deletion preserves the entire database on invalid selection or e
 void test("single and selected deletion reject subscriptions that appear after confirmation without any partial removal", async () => {
   await temporaryStore(async (store, _original) => {
     await assert.rejects(
-      deleteLibraryMods(store, ["steam-1"]),
+      deleteInactiveLibraryMods(store, ["steam-1"]),
       /Subscribed mods cannot be removed/,
     );
     await store.update((vault) => ({
@@ -188,7 +219,10 @@ void test("single and selected deletion reject subscriptions that appear after c
       },
     }));
     const before = await readFile(store.path, "utf8");
-    await assert.rejects(deleteLibraryMods(store, ["steam-2", "steam-3"]), /Nothing was deleted/);
+    await assert.rejects(
+      deleteInactiveLibraryMods(store, ["steam-2", "steam-3"]),
+      /Nothing was deleted/,
+    );
     assert.equal(await readFile(store.path, "utf8"), before);
     assert.equal((await store.load()).mods.length, 3);
   });
@@ -254,7 +288,7 @@ void test("a failed bulk deletion checkpoint blocks all record removal", async (
   await temporaryStore(async (store, original, directory) => {
     const before = await readFile(store.path, "utf8");
     await writeFile(join(directory, "backups"), "not a directory");
-    await assert.rejects(deleteLibraryMods(store, ["steam-2", "steam-3"]));
+    await assert.rejects(deleteInactiveLibraryMods(store, ["steam-2", "steam-3"]));
     assert.equal(await readFile(store.path, "utf8"), before);
     assert.deepEqual((await store.load()).mods, original.mods);
   });
@@ -503,7 +537,7 @@ void test("deleting a saved mod during metadata refresh cannot recreate it or wr
       return pending;
     });
     await ready;
-    const deleted = await deleteLibraryMods(store, ["steam-2"]);
+    const deleted = await deleteInactiveLibraryMods(store, ["steam-2"]);
     const raw = await readFile(store.path, "utf8");
     resolve(response([detail]));
     await assert.rejects(refresh, /saved mod changed/);
@@ -652,4 +686,5 @@ void test("tag search resets modal input decoration in the higher-priority utili
     /\.mod-row > \.tooltip-action\s*\{\s*@apply col-start-2 row-start-1 self-center/,
   );
   assert.match(custom, /grid-rows-\[40px_auto_minmax\(0,1fr\)_auto\]/);
+  assert.match(custom, /\.mod-visual > \.mod-source\s*\{\s*@apply absolute top-2 right-2/);
 });

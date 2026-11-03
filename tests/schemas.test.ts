@@ -6,11 +6,41 @@ import { type IpcChannel, ipcChannels, validateIpcArgs } from "../src/shared/ipc
 import { maxIpcTextLength } from "../src/shared/limits";
 import type { Mod } from "../src/shared/types";
 import { isRecord, requireValue } from "../src/shared/validation";
-import { mergeSteamSync, normalizeVault, serializeVault } from "../src/shared/vault";
+import {
+  mergeSteamSync,
+  mergeVaultSave,
+  normalizeVault,
+  serializeVault,
+} from "../src/shared/vault";
 import { parseStoredVault } from "../src/shared/vaultValidation";
 import { assertUnchanged, steamImport } from "./helpers/properties";
 
 const mod = { id: "saved-mod", name: "Saved mod" };
+const pendingDraft = {
+  version: 1,
+  changes: [],
+  activeOrder: ["author.one", "ludeon.rimworld"],
+  activeOrderOperations: [
+    {
+      id: "order-7",
+      kind: "manual",
+      method: "drag",
+      packageId: "author.one",
+      modId: "local-author-one",
+      modName: "Author One",
+      fromPosition: 2,
+      toPosition: 1,
+    },
+  ],
+  activeBasePackageIds: ["ludeon.rimworld", "author.one"],
+  activeBaseConfigTarget: "automatic",
+  operationMemberships: [
+    {
+      operationId: "order-7",
+      packageIds: ["ludeon.rimworld", "author.one"],
+    },
+  ],
+} as const;
 const storedVault = ({
   mods = [],
   userTags = [],
@@ -104,6 +134,19 @@ void test("database schemas validate and preserve declared mod dependencies", ()
       /Invalid/,
     );
   }
+
+  const dependenciesByVersion = [
+    { gameVersion: "v1.6", dependencies },
+    { gameVersion: "v1.5", dependencies: [] },
+  ];
+  const versionedInput = storedVault({ mods: [{ ...mod, dependenciesByVersion }] });
+  assert.strictEqual(parseStoredVault(versionedInput), versionedInput);
+  for (const invalid of [null, {}, [{ gameVersion: "", dependencies: [] }]]) {
+    assert.throws(
+      () => parseStoredVault(storedVault({ mods: [{ ...mod, dependenciesByVersion: invalid }] })),
+      /Invalid/,
+    );
+  }
 });
 
 void test("database schemas retain every unknown JSON field, including prototype-like keys at all levels", () => {
@@ -171,6 +214,127 @@ void test("subscription overrides reject prototype-like IDs", () => {
   );
 });
 
+void test("device-local Workshop metadata attempts validate and normalize exact numeric IDs", () => {
+  const input = storedVault({
+    deviceState: {
+      steam: {
+        observedIds: [],
+        metadataAttemptedIds: ["123", "123", "456"],
+        pending: {},
+      },
+    },
+  });
+  assert.strictEqual(parseStoredVault(input), input);
+  assert.deepEqual(normalizeVault(input).localSteamState.metadataAttemptedIds, ["123", "456"]);
+  for (const metadataAttemptedIds of [null, [123], [""], ["01"], ["not-an-id"]]) {
+    assert.throws(
+      () =>
+        parseStoredVault(
+          storedVault({
+            deviceState: { steam: { observedIds: [], metadataAttemptedIds, pending: {} } },
+          }),
+        ),
+      /Invalid/,
+    );
+  }
+});
+
+void test("device-local pending drafts validate, round-trip and clear explicitly", () => {
+  const input = storedVault({
+    deviceState: {
+      steam: { observedIds: [], pending: {} },
+      pendingDraft,
+      futureDeviceValue: { preserved: true },
+    },
+  });
+  assert.strictEqual(parseStoredVault(input), input);
+  const normalized = normalizeVault(input);
+  assert.deepEqual(normalized.pendingDraft, pendingDraft);
+  const serialized = serializeVault(normalized);
+  assert.deepEqual(serialized.deviceState.pendingDraft, pendingDraft);
+  assert.deepEqual(Reflect.get(serialized.deviceState, "futureDeviceValue"), {
+    preserved: true,
+  });
+
+  const cleared = mergeVaultSave(normalized, { ...normalized, pendingDraft: undefined });
+  assert.equal(cleared.pendingDraft, undefined);
+  const clearedStored = serializeVault(cleared);
+  assert.equal(Object.hasOwn(clearedStored.deviceState, "pendingDraft"), false);
+  assert.equal(normalizeVault(clearedStored).pendingDraft, undefined);
+});
+
+void test("pending draft schema rejects unsafe, incomplete and internally inconsistent work", () => {
+  const parseDraft = (draft: unknown) =>
+    parseStoredVault(
+      storedVault({
+        deviceState: { steam: { observedIds: [], pending: {} }, pendingDraft: draft },
+      }),
+    );
+  const changed = (patch: Record<string, unknown>) => ({ ...pendingDraft, ...patch });
+
+  for (const draft of [
+    changed({ version: 2 }),
+    changed({ changes: [], activeOrderOperations: [], operationMemberships: [] }),
+    changed({ activeOrder: undefined }),
+    changed({ activeBasePackageIds: undefined }),
+    changed({ activeBaseConfigTarget: undefined }),
+    changed({ activeBasePackageIds: ["author.one", "Author.One_steam"] }),
+    changed({ operationMemberships: [] }),
+    changed({
+      operationMemberships: [
+        ...pendingDraft.operationMemberships,
+        ...pendingDraft.operationMemberships,
+      ],
+    }),
+    changed({
+      activeOrderOperations: [
+        { ...pendingDraft.activeOrderOperations[0], id: "unsafe-operation-id" },
+      ],
+      operationMemberships: [
+        { ...pendingDraft.operationMemberships[0], operationId: "unsafe-operation-id" },
+      ],
+    }),
+    changed({
+      changes: [
+        {
+          action: "activate",
+          target: { id: "missing-package", name: "Missing", source: "local" },
+        },
+      ],
+    }),
+    changed({
+      changes: [
+        {
+          action: "subscribe",
+          target: {
+            id: "missing-workshop",
+            name: "Missing",
+            source: "steam",
+            packageId: "author.missing",
+          },
+        },
+      ],
+    }),
+  ]) {
+    assert.throws(() => parseDraft(draft), /Invalid|Duplicate/);
+  }
+
+  assert.throws(
+    () =>
+      parseDraft(
+        changed({
+          activeBaseConfigTarget: "private-target-value",
+          operationMemberships: [],
+        }),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.doesNotMatch(error.message, /private-target-value/);
+      return true;
+    },
+  );
+});
+
 void test("database schema failures identify the field without exposing private input data", () => {
   assert.throws(
     () => parseStoredVault(storedVault({ mods: [{ ...mod, notes: { secret: "private-note" } }] })),
@@ -229,6 +393,17 @@ void test("every IPC channel has a schema accepting supported arities and reject
   const requests = {
     [ipcChannels.openLogs]: [[]],
     [ipcChannels.openDatabaseFolder]: [[]],
+    [ipcChannels.launchRimWorld]: [[]],
+    [ipcChannels.importModList]: [[]],
+    [ipcChannels.exportModList]: [
+      [{ gameVersion: "1.6", packageIds: ["ludeon.rimworld"] }],
+      [
+        {
+          gameVersion: "1.6.4871 rev595",
+          packageIds: ["brrainz.harmony", "ludeon.rimworld", "author.mod"],
+        },
+      ],
+    ],
     [ipcChannels.revealModFolder]: [[mod.id]],
     [ipcChannels.openWorkshopInBrowser]: [["1"]],
     [ipcChannels.load]: [[]],
@@ -239,7 +414,26 @@ void test("every IPC channel has a schema accepting supported arities and reject
     [ipcChannels.chooseWorkshopModsPath]: [[], [undefined], ["/workshop"]],
     [ipcChannels.detectWorkshopModsPath]: [[]],
     [ipcChannels.validateWorkshopModsPath]: [["/workshop"]],
+    [ipcChannels.getActiveModConfiguration]: [
+      [],
+      [undefined],
+      [{ rimWorldConfigPath: "", futureSetting: true }],
+    ],
+    [ipcChannels.getInstalledMods]: [
+      [],
+      [undefined],
+      [{ workshopModsPath: "", futureSetting: true }],
+      [{ workshopModsPath: "/workshop" }, true],
+    ],
     [ipcChannels.getActiveMods]: [[], [undefined], [{ workshopModsPath: "", futureSetting: true }]],
+    [ipcChannels.setActiveMods]: [
+      [undefined, ["ludeon.rimworld"], ["ludeon.rimworld"]],
+      [
+        { rimWorldConfigPath: "/config/ModsConfig.xml", futureSetting: true },
+        ["ludeon.rimworld", "author.mod"],
+        ["ludeon.rimworld"],
+      ],
+    ],
     [ipcChannels.syncSubscribedMods]: [[]],
     [ipcChannels.refreshSubscriptions]: [[]],
     [ipcChannels.inspectWorkshopStatus]: [[]],
@@ -300,4 +494,32 @@ void test("IPC text checks retain the UTF-16 length limit and never trim or coer
   const args: unknown[] = [" /custom path "];
   validateIpcArgs(ipcChannels.revealModFolder, args);
   assert.deepEqual(args, [" /custom path "]);
+});
+
+void test("mod-list export IPC rejects invalid, duplicate, Core-less and oversized orders", () => {
+  const request = (packageIds: string[], gameVersion = "1.6") => {
+    validateIpcArgs(ipcChannels.exportModList, [{ gameVersion, packageIds }]);
+  };
+
+  assert.doesNotThrow(() => {
+    request(["ludeon.rimworld", "author.valid"]);
+  });
+  assert.throws(() => {
+    request(["author.mod"]);
+  }, /Invalid/);
+  assert.throws(() => {
+    request(["ludeon.rimworld", "Author.Mod", "author.mod_steam"]);
+  }, /Invalid/);
+  assert.throws(() => {
+    request(["ludeon.rimworld", "steam.123"]);
+  }, /Invalid/);
+  assert.throws(() => {
+    request(["ludeon.rimworld", "_steam"]);
+  }, /Invalid/);
+  assert.throws(() => {
+    request(["ludeon.rimworld_steam"]);
+  }, /Invalid/);
+  assert.throws(() => {
+    request(["ludeon.rimworld"], " ");
+  }, /Invalid/);
 });
