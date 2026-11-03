@@ -1,4 +1,4 @@
-import { modSources } from "../../../shared/domainConstants";
+import { modSources, subscriptionCommands } from "../../../shared/domainConstants";
 import { getOfficialContent } from "../../../shared/officialContent";
 import {
   installedModId,
@@ -266,8 +266,12 @@ export function reconcileInstalledModMetadata(
     // The current model gives ordinary local packages one canonical row ID. When multiple
     // physical copies share that package ID, persisting an arbitrary one would merge paths on the
     // next scan. Exact-path matches above remain safe; unmatched ambiguous copies stay transient.
+    // A confirmed unsubscribe can also leave its folder behind temporarily. Its pending override
+    // keeps an explicitly deleted library row suppressed until folder discovery catches up.
     if (
       (!installed.workshopId && ambiguousLocalPackages.has(packageKey)) ||
+      (installed.workshopId &&
+        vault.localSteamState.pending[installed.workshopId] === subscriptionCommands.unsubscribe) ||
       idOwners.has(targetId)
     ) {
       continue;

@@ -291,6 +291,9 @@ test("Mod Info add-back cancels only pending removals and retains staged unsubsc
 test("removing an inactive subscribed mod stages unsubscribe and removal as one confirmed draft", async ({
   desktop,
 }) => {
+  await expect
+    .poll(async () => (await desktop.mod(sampleMods.other.id)).gameVersions)
+    .toEqual(["1.6"]);
   const before = await desktop.vault();
   const row = desktop.row(desktop.inactive, sampleMods.other.name);
   await row.locator(".mod-row-main").click();

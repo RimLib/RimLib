@@ -34,6 +34,22 @@ import { aboutXml, configXml, initialSubscribedIds, modListXml, sampleVault } fr
 export type Scenario =
   "populated" | "empty" | "corrupt" | "future" | "offline" | "disconnected" | "large";
 
+async function readPublishedFile(path: string): Promise<string> {
+  const deadline = Date.now() + 1_000;
+  for (;;) {
+    try {
+      return await readFile(path, "utf8");
+    } catch (error) {
+      // Guarded atomic writes briefly claim the old pathname before linking the fully flushed
+      // replacement. Out-of-process fixture reads must wait for that publication window to close.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || Date.now() >= deadline) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
 export class Desktop {
   readonly token = randomUUID();
   readonly errors: string[] = [];
@@ -284,7 +300,7 @@ export class Desktop {
   }
 
   async vault(): Promise<ModVault> {
-    return normalizeVault(JSON.parse(await readFile(this.database, "utf8")));
+    return normalizeVault(JSON.parse(await readPublishedFile(this.database)));
   }
 
   async mod(id: string): Promise<Mod> {

@@ -685,6 +685,9 @@ test("Move to position stages an Active order change and applies it only on conf
 test("manual order drafts stay separate while Auto-sort replaces only the earlier order history", async ({
   desktop,
 }) => {
+  await expect
+    .poll(async () => (await desktop.mod(sampleMods.other.id)).gameVersions)
+    .toEqual(["1.6"]);
   const names = desktop.active.locator(".mod-row-copy strong");
 
   async function stageMove(name: string, initialPosition: number, destination: number) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { reconcileInstalledModMetadata } from "../src/renderer/src/utils/installedModPersistence";
+import { subscriptionCommands } from "../src/shared/domainConstants";
 import type { InstalledModMetadata, Mod, ModVault } from "../src/shared/types";
 import { createEmptyVault } from "../src/shared/vault";
 
@@ -211,6 +212,34 @@ void test("new non-official Workshop and local rows share one observation time a
   assert.equal(workshop.addedAt, observedAt);
   assert.equal(local.addedAt, observedAt);
   assert.ok(!next.mods.some((entry) => entry.packageId === "ludeon.rimworld.anomaly"));
+});
+
+void test("a pending unsubscribe keeps a deleted Workshop row suppressed while its folder lingers", () => {
+  const current = vault([], ["123", "456"]);
+  current.localSteamState.pending = { "123": subscriptionCommands.unsubscribe };
+  const next = reconcileInstalledModMetadata(
+    current,
+    [
+      {
+        packageId: "author.removed",
+        workshopId: "123",
+        localPath: "/workshop/123",
+        name: "Explicitly removed mod",
+      },
+      {
+        packageId: "author.discovered",
+        workshopId: "456",
+        localPath: "/workshop/456",
+        name: "Newly discovered mod",
+      },
+    ],
+    observedAt,
+  );
+
+  assert.deepEqual(
+    next.mods.map(({ workshopId }) => workshopId),
+    ["456"],
+  );
 });
 
 void test("non-canonical copies of an official package remain ordinary persisted mods", () => {

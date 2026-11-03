@@ -33,8 +33,8 @@ function withoutActiveContent(raw: string) {
   );
 }
 
-async function fixture(run: (path: string, original: string) => Promise<void>) {
-  const directory = await mkdtemp(join(tmpdir(), "rimlib-active-config-"));
+async function fixture(run: (path: string, original: string) => Promise<void>, root = tmpdir()) {
+  const directory = await mkdtemp(join(root, "rimlib-active-config-"));
   const path = join(directory, "ModsConfig.xml");
   const original = config(currentOrder);
   try {
@@ -54,7 +54,7 @@ void test("configured relative paths resolve consistently to an absolute ModsCon
     assert.equal(isAbsolute(configuredPath), false);
     assert.equal(resolveConfigPath(settings), expectedPath);
     assert.equal((await readConfig(settings)).path, expectedPath);
-  });
+  }, process.cwd());
 });
 
 void test("active config reads reject non-files, oversized input, and invalid UTF-8 before parsing", async () => {
